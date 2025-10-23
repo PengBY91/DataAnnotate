@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # PostgreSQL数据库
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: datalabels
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # 后端API服务
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/datalabels
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: your-secret-key-here
+    volumes:
+      - ./backend:/app
+      - ./uploads:/app/static/uploads
+    depends_on:
+      - db
+      - redis
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # 前端服务
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev
+
+volumes:
+  postgres_data:

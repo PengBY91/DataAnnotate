@@ -1,0 +1,30 @@
+# 兼容性修复（必须首先安装）
+setuptools>=68.0.0
+wheel>=0.40.0
+
+# 核心框架
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic[email]==2.5.0
+
+# 数据库
+sqlalchemy==2.0.23
+alembic==1.12.1
+psycopg2-binary==2.9.9
+
+# 认证和安全
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# 图像处理（使用兼容版本）
+pillow==10.2.0
+opencv-python==4.9.0.80
+numpy==1.26.4
+
+# 工具
+python-dotenv==1.0.0
+redis==5.0.1
+
+# 任务队列（可选）
+celery==5.3.4
