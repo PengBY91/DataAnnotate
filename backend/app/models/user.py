@@ -31,5 +31,8 @@ class User(Base):
     assigned_tasks = relationship("Task", foreign_keys="Task.assignee_id", back_populates="assignee")
     reviewed_tasks = relationship("Task", foreign_keys="Task.reviewer_id", back_populates="reviewer")
     
+    # 新增：多对多关系 - 任务分配
+    task_assignments = relationship("TaskAssignment", back_populates="user")
+    
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', role='{self.role.value}')>"

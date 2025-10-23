@@ -14,6 +14,7 @@ class AnnotationBase(BaseModel):
 
 class AnnotationCreate(AnnotationBase):
     image_id: int
+    status: Optional[AnnotationStatus] = None
 
 class AnnotationUpdate(BaseModel):
     label: Optional[str] = None
@@ -38,8 +39,11 @@ class AnnotationResponse(AnnotationBase):
 class ImageAnnotation(BaseModel):
     image_id: int
     filename: str
-    width: int
-    height: int
-    annotations: List[AnnotationResponse]
     is_annotated: bool
     is_reviewed: bool
+    annotation_count: int
+    required_annotation_count: int
+    annotations: List[AnnotationResponse]
+    
+    class Config:
+        from_attributes = True

@@ -35,19 +35,42 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements.txt || {
+    echo "⚠️  部分依赖安装失败，但可以继续（默认使用 SQLite 数据库）"
+}
 cd ..
 
 # 安装前端依赖
 echo "🟢 安装前端依赖..."
 cd frontend
-npm install
+if [ ! -f "package.json" ]; then
+    echo "❌ package.json 文件不存在"
+    exit 1
+fi
+npm install || {
+    echo "⚠️  前端依赖安装失败"
+    exit 1
+}
 cd ..
+
+# 初始化数据库
+echo "🗄️  初始化数据库..."
+cd backend
+source venv/bin/activate
+python -c "
+from app.database import engine, Base
+from app.models.user import User
+from app.models.task import Task
+from app.models.image import Image
+from app.models.annotation import Annotation
+
+# 创建所有表
+Base.metadata.create_all(bind=engine)
+print('✅ 数据库表创建成功')
+"
 
 # 创建默认管理员用户
 echo "👤 创建默认管理员用户..."
-cd backend
-source venv/bin/activate
 python -c "
 from app.database import SessionLocal
 from app.models.user import User, UserRole

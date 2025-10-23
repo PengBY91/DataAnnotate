@@ -127,13 +127,20 @@
           />
         </el-form-item>
         
-        <el-form-item label="标注类型" prop="annotation_type">
-          <el-select v-model="createForm.annotation_type" placeholder="选择标注类型">
-            <el-option label="边界框" value="bbox" />
-            <el-option label="多边形" value="polygon" />
-            <el-option label="关键点" value="keypoint" />
+        <el-form-item label="标注类型" prop="annotation_types">
+          <el-select
+            v-model="createForm.annotation_types"
+            placeholder="选择标注类型（可多选）"
+            multiple
+            collapse-tags
+          >
             <el-option label="分类" value="classification" />
+            <el-option label="回归" value="regression" />
+            <el-option label="边界框" value="bbox" />
           </el-select>
+          <div style="color: #999; font-size: 12px; margin-top: 4px;">
+            可同时选择多种标注类型
+          </div>
         </el-form-item>
         
         <el-form-item label="优先级" prop="priority">
@@ -211,7 +218,8 @@ const createFormRef = ref()
 const createForm = reactive({
   title: '',
   description: '',
-  annotation_type: '',
+  annotation_type: 'bbox',  // 兼容旧字段，默认值
+  annotation_types: [],  // 新字段：多选标注类型
   priority: 'medium',
   labels: [],
   instructions: ''
@@ -221,7 +229,13 @@ const labelInput = ref('')
 
 const createRules = {
   title: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  annotation_type: [{ required: true, message: '请选择标注类型', trigger: 'change' }]
+  annotation_types: [{ 
+    required: true, 
+    message: '请至少选择一种标注类型', 
+    trigger: 'change',
+    type: 'array',
+    min: 1
+  }]
 }
 
 const getStatusType = (status) => {
@@ -279,9 +293,17 @@ const fetchTasks = async () => {
   try {
     const params = {
       skip: (pagination.page - 1) * pagination.size,
-      limit: pagination.size,
-      ...filters
+      limit: pagination.size
     }
+    
+    // 只添加非空的过滤参数
+    if (filters.status) {
+      params.status = filters.status
+    }
+    if (filters.priority) {
+      params.priority = filters.priority
+    }
+    
     const response = await api.get('/tasks', { params })
     tasks.value = response.data
   } catch (error) {
@@ -334,7 +356,8 @@ const resetCreateForm = () => {
   Object.assign(createForm, {
     title: '',
     description: '',
-    annotation_type: '',
+    annotation_type: 'bbox',
+    annotation_types: [],
     priority: 'medium',
     labels: [],
     instructions: ''
@@ -349,7 +372,13 @@ const handleCreateTask = async () => {
     await createFormRef.value.validate()
     creating.value = true
     
-    await api.post('/tasks', createForm)
+    // 确保 annotation_type 有默认值（向后兼容）
+    const taskData = {
+      ...createForm,
+      annotation_type: createForm.annotation_types[0] || 'bbox'
+    }
+    
+    await api.post('/tasks', taskData)
     ElMessage.success('任务创建成功')
     showCreateDialog.value = false
     fetchTasks()

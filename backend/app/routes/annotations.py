@@ -13,13 +13,20 @@ from app.utils.auth import get_current_user
 
 router = APIRouter()
 
-@router.post("/", response_model=AnnotationResponse)
+@router.post("", response_model=AnnotationResponse)
 async def create_annotation(
     annotation: AnnotationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """创建标注"""
+    # 管理员不能参与标注
+    if current_user.role == UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="管理员不能参与标注，只能审核"
+        )
+    
     # 验证图像存在
     image = db.query(Image).filter(Image.id == annotation.image_id).first()
     if not image:
@@ -42,16 +49,64 @@ async def create_annotation(
         data=annotation.data,
         notes=annotation.notes,
         image_id=annotation.image_id,
-        annotator_id=current_user.id
+        annotator_id=current_user.id,
+        status=annotation.status if hasattr(annotation, 'status') else AnnotationStatus.SUBMITTED
     )
     
     db.add(db_annotation)
+    
+    # 更新图像的标注计数
+    from app.models.task_assignment import TaskAssignment
+    
+    # 检查该用户是否已经标注过此图像
+    existing_count = db.query(Annotation).filter(
+        Annotation.image_id == annotation.image_id,
+        Annotation.annotator_id == current_user.id
+    ).count()
+    
+    # 如果是第一次标注，增加计数
+    if existing_count == 0:
+        image.annotation_count = (image.annotation_count or 0) + 1
+        
+        # 更新已完成用户列表
+        if not image.completed_by_users:
+            image.completed_by_users = []
+        if current_user.id not in image.completed_by_users:
+            image.completed_by_users.append(current_user.id)
+        
+        # 检查是否达到要求的标注数量
+        required_count = image.required_annotation_count or 1
+        if image.annotation_count >= required_count:
+            image.is_annotated = True
+        
+        # 更新任务统计
+        if image.task:
+            # 更新任务的已标注图像数
+            annotated_count = db.query(Image).filter(
+                Image.task_id == image.task_id,
+                Image.is_annotated == True
+            ).count()
+            image.task.annotated_images = annotated_count
+            
+            # 更新用户的完成计数
+            assignment = db.query(TaskAssignment).filter(
+                TaskAssignment.task_id == image.task_id,
+                TaskAssignment.user_id == current_user.id
+            ).first()
+            
+            if assignment:
+                user_completed = db.query(Image).filter(
+                    Image.task_id == image.task_id,
+                    Image.completed_by_users.contains([current_user.id])
+                ).count()
+                assignment.completed_images_count = user_completed
+    
     db.commit()
     db.refresh(db_annotation)
     
     return db_annotation
 
-@router.get("/", response_model=List[AnnotationResponse])
+@router.get("", response_model=List[AnnotationResponse])
 async def get_annotations(
     image_id: Optional[int] = None,
     task_id: Optional[int] = None,
@@ -78,6 +133,32 @@ async def get_annotations(
     
     annotations = query.offset(skip).limit(limit).all()
     return annotations
+
+@router.get("/image/{image_id}", response_model=ImageAnnotation)
+async def get_image_annotations(
+    image_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取图像的所有标注详情"""
+    image = db.query(Image).filter(Image.id == image_id).first()
+    if not image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="图像不存在"
+        )
+    
+    annotations = db.query(Annotation).filter(Annotation.image_id == image_id).all()
+    
+    return {
+        "image_id": image.id,
+        "filename": image.original_filename,
+        "is_annotated": image.is_annotated,
+        "is_reviewed": image.is_reviewed,
+        "annotation_count": image.annotation_count or 0,
+        "required_annotation_count": image.required_annotation_count or 1,
+        "annotations": annotations
+    }
 
 @router.get("/{annotation_id}", response_model=AnnotationResponse)
 async def get_annotation(
@@ -144,11 +225,12 @@ async def review_annotation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """审核标注"""
-    if current_user.role not in [UserRole.ADMIN, UserRole.REVIEWER]:
+    """审核单个标注"""
+    # 只有管理员可以审核
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
+            detail="只有管理员可以审核标注"
         )
     
     annotation = db.query(Annotation).filter(Annotation.id == annotation_id).first()
@@ -162,9 +244,94 @@ async def review_annotation(
     annotation.reviewer_id = current_user.id
     annotation.review_notes = review_notes
     
+    # 更新图像的审核状态
+    image = db.query(Image).filter(Image.id == annotation.image_id).first()
+    if image:
+        # 检查该图像的所有标注是否都已审核
+        total_annotations = db.query(Annotation).filter(
+            Annotation.image_id == image.id
+        ).count()
+        
+        approved_annotations = db.query(Annotation).filter(
+            Annotation.image_id == image.id,
+            Annotation.status == AnnotationStatus.APPROVED
+        ).count()
+        
+        # 如果所有标注都已通过审核，标记图像为已审核
+        if total_annotations > 0 and approved_annotations >= total_annotations:
+            image.is_reviewed = True
+            
+            # 更新任务统计
+            if image.task:
+                reviewed_count = db.query(Image).filter(
+                    Image.task_id == image.task_id,
+                    Image.is_reviewed == True
+                ).count()
+                image.task.reviewed_images = reviewed_count
+    
     db.commit()
     
     return {"message": "标注审核完成"}
+
+@router.post("/image/{image_id}/review")
+async def review_image_annotations(
+    image_id: int,
+    status: AnnotationStatus,
+    review_notes: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """批量审核图像的所有标注"""
+    # 只有管理员可以审核
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有管理员可以审核标注"
+        )
+    
+    image = db.query(Image).filter(Image.id == image_id).first()
+    if not image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="图像不存在"
+        )
+    
+    # 更新该图像的所有标注
+    annotations = db.query(Annotation).filter(Annotation.image_id == image_id).all()
+    
+    if not annotations:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该图像没有标注"
+        )
+    
+    for annotation in annotations:
+        annotation.status = status
+        annotation.reviewer_id = current_user.id
+        if review_notes:
+            annotation.review_notes = review_notes
+    
+    # 更新图像的审核状态
+    if status == AnnotationStatus.APPROVED:
+        image.is_reviewed = True
+    elif status == AnnotationStatus.REJECTED:
+        image.is_reviewed = False
+    
+    # 更新任务统计
+    if image.task:
+        reviewed_count = db.query(Image).filter(
+            Image.task_id == image.task_id,
+            Image.is_reviewed == True
+        ).count()
+        image.task.reviewed_images = reviewed_count
+    
+    db.commit()
+    
+    return {
+        "message": f"已审核 {len(annotations)} 个标注",
+        "count": len(annotations),
+        "status": status
+    }
 
 @router.delete("/{annotation_id}")
 async def delete_annotation(

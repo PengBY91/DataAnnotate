@@ -2,29 +2,31 @@
 setuptools>=68.0.0
 wheel>=0.40.0
 
-# 核心框架
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic[email]==2.5.0
+# 核心框架（更新版本以支持 Python 3.13）
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic[email]>=2.5.0
 
 # 数据库
-sqlalchemy==2.0.23
-alembic==1.12.1
-psycopg2-binary==2.9.9
+sqlalchemy>=2.0.23
+alembic>=1.12.1
+# PostgreSQL 驱动（如果使用 PostgreSQL，需要先安装 PostgreSQL 开发工具）
+# psycopg2-binary==2.9.9
 
 # 认证和安全
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
+python-jose[cryptography]>=3.3.0
+passlib>=1.7.4
+bcrypt==4.0.1
+python-multipart>=0.0.6
 
-# 图像处理（使用兼容版本）
-pillow==10.2.0
-opencv-python==4.9.0.80
-numpy==1.26.4
+# 图像处理（Python 3.13 兼容版本）
+pillow>=10.3.0
+opencv-python>=4.10.0.84
+numpy>=1.26.4
 
 # 工具
-python-dotenv==1.0.0
-redis==5.0.1
+python-dotenv>=1.0.0
+redis>=5.0.1
 
 # 任务队列（可选）
-celery==5.3.4
+celery>=5.3.4

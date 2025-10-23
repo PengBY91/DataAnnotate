@@ -7,12 +7,14 @@ from typing import List, Optional
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.task import Task, TaskStatus
-from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStats
+from app.models.task_assignment import TaskAssignment
+from app.models.image import Image
+from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStats, AssigneeInfo
 from app.utils.auth import get_current_user
 
 router = APIRouter()
 
-@router.post("/", response_model=TaskResponse)
+@router.post("", response_model=TaskResponse)
 async def create_task(
     task: TaskCreate,
     db: Session = Depends(get_db),
@@ -45,11 +47,12 @@ async def create_task(
     
     return db_task
 
-@router.get("/", response_model=List[TaskResponse])
+@router.get("", response_model=List[TaskResponse])
 async def get_tasks(
     skip: int = 0,
     limit: int = 100,
-    status: Optional[TaskStatus] = None,
+    status: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
     assignee_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -69,9 +72,17 @@ async def get_tasks(
         query = query.filter(Task.creator_id == current_user.id)
     # 管理员可以看到所有任务
     
-    # 应用过滤条件
-    if status:
-        query = query.filter(Task.status == status)
+    # 应用过滤条件（忽略空字符串）
+    if status and status.strip():
+        try:
+            status_enum = TaskStatus(status)
+            query = query.filter(Task.status == status_enum)
+        except ValueError:
+            pass  # 忽略无效的状态值
+    
+    if priority and priority.strip():
+        query = query.filter(Task.priority == priority)
+    
     if assignee_id:
         query = query.filter(Task.assignee_id == assignee_id)
     
@@ -128,8 +139,13 @@ async def get_task(
             detail="任务不存在"
         )
     
-    # 权限检查
-    if (current_user.role == UserRole.ANNOTATOR and task.assignee_id != current_user.id) or \
+    # 权限检查 - 检查是否在分配列表中
+    is_assigned = db.query(TaskAssignment).filter(
+        TaskAssignment.task_id == task_id,
+        TaskAssignment.user_id == current_user.id
+    ).first() is not None
+    
+    if (current_user.role == UserRole.ANNOTATOR and not is_assigned and task.assignee_id != current_user.id) or \
        (current_user.role == UserRole.REVIEWER and task.reviewer_id != current_user.id) or \
        (current_user.role == UserRole.ENGINEER and task.creator_id != current_user.id):
         if current_user.role != UserRole.ADMIN:
@@ -138,7 +154,48 @@ async def get_task(
                 detail="权限不足"
             )
     
-    return task
+    # 获取分配的用户列表
+    assignments = db.query(TaskAssignment).filter(
+        TaskAssignment.task_id == task_id
+    ).all()
+    
+    assignees_info = []
+    for assignment in assignments:
+        user = db.query(User).filter(User.id == assignment.user_id).first()
+        if user:
+            assignees_info.append(AssigneeInfo(
+                user_id=user.id,
+                username=user.username,
+                full_name=user.full_name,
+                role=user.role.value,
+                completed_images=assignment.completed_images_count
+            ))
+    
+    # 将 task 转换为字典并添加 assignees
+    task_dict = {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description,
+        "priority": task.priority,
+        "annotation_type": task.annotation_type,
+        "labels": task.labels,
+        "instructions": task.instructions,
+        "deadline": task.deadline,
+        "required_annotations_per_image": task.required_annotations_per_image,
+        "auto_assign_images": task.auto_assign_images,
+        "status": task.status,
+        "creator_id": task.creator_id,
+        "assignee_id": task.assignee_id,
+        "reviewer_id": task.reviewer_id,
+        "total_images": task.total_images,
+        "annotated_images": task.annotated_images,
+        "reviewed_images": task.reviewed_images,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "assignees": assignees_info
+    }
+    
+    return task_dict
 
 @router.put("/{task_id}", response_model=TaskResponse)
 async def update_task(
@@ -175,11 +232,13 @@ async def update_task(
 @router.post("/{task_id}/assign")
 async def assign_task(
     task_id: int,
-    assignee_id: int,
+    assignee_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """分配任务"""
+    """分配任务（单人，兼容旧接口）"""
+    print(f"分配任务: task_id={task_id}, assignee_id={assignee_id}, current_user={current_user.username}")
+    
     if current_user.role not in [UserRole.ADMIN, UserRole.ENGINEER]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -201,11 +260,95 @@ async def assign_task(
             detail="分配用户不存在"
         )
     
+    # 创建任务分配记录
+    existing_assignment = db.query(TaskAssignment).filter(
+        TaskAssignment.task_id == task_id,
+        TaskAssignment.user_id == assignee_id
+    ).first()
+    
+    if not existing_assignment:
+        assignment = TaskAssignment(
+            task_id=task_id,
+            user_id=assignee_id,
+            role="annotator"
+        )
+        db.add(assignment)
+    
+    # 更新旧字段以保持兼容性
     task.assignee_id = assignee_id
     task.status = TaskStatus.ASSIGNED
     db.commit()
     
-    return {"message": "任务分配成功"}
+    print(f"任务分配成功: {task.title} -> {assignee.username}")
+    
+    return {"message": "任务分配成功", "task_id": task_id, "assignee": assignee.username}
+
+@router.post("/{task_id}/assign-multiple")
+async def assign_task_to_multiple_users(
+    task_id: int,
+    assignee_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """批量分配任务给多个用户"""
+    print(f"批量分配任务: task_id={task_id}, assignee_ids={assignee_ids}")
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ENGINEER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="权限不足"
+        )
+    
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在"
+        )
+    
+    # 验证所有用户存在
+    users = db.query(User).filter(User.id.in_(assignee_ids)).all()
+    if len(users) != len(assignee_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="部分用户不存在"
+        )
+    
+    assigned_count = 0
+    for user_id in assignee_ids:
+        # 检查是否已经分配过
+        existing = db.query(TaskAssignment).filter(
+            TaskAssignment.task_id == task_id,
+            TaskAssignment.user_id == user_id
+        ).first()
+        
+        if not existing:
+            assignment = TaskAssignment(
+                task_id=task_id,
+                user_id=user_id,
+                role="annotator"
+            )
+            db.add(assignment)
+            assigned_count += 1
+    
+    # 更新任务状态
+    if task.status == TaskStatus.PENDING:
+        task.status = TaskStatus.ASSIGNED
+    
+    # 根据任务配置，为每张图像设置需要的标注数量
+    images = db.query(Image).filter(Image.task_id == task_id).all()
+    for image in images:
+        image.required_annotation_count = task.required_annotations_per_image
+    
+    db.commit()
+    
+    print(f"批量分配完成: {assigned_count} 个用户被分配到任务 {task.title}")
+    
+    return {
+        "message": f"成功分配任务给 {assigned_count} 个用户",
+        "task_id": task_id,
+        "assigned_count": assigned_count
+    }
 
 @router.post("/{task_id}/start")
 async def start_task(

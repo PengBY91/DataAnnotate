@@ -25,14 +25,17 @@ router = APIRouter()
 @router.post("/upload")
 async def upload_images(
     task_id: int = Form(...),
-    files: List[UploadFile] = File(...),
+    files: UploadFile = File(...),  # 改为单个文件
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """上传图像文件"""
+    print(f"收到上传请求: task_id={task_id}, 文件名={files.filename}")
+    
     # 验证任务存在
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
+        print(f"任务不存在: task_id={task_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="任务不存在"
@@ -41,6 +44,7 @@ async def upload_images(
     # 权限检查：只有管理员、算法工程师或任务创建者可以上传
     if current_user.role not in [UserRole.ADMIN, UserRole.ENGINEER]:
         if task.creator_id != current_user.id:
+            print(f"权限不足: user_id={current_user.id}, creator_id={task.creator_id}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="权限不足"
@@ -49,10 +53,12 @@ async def upload_images(
     # 确保上传目录存在
     upload_dir = os.path.join(settings.UPLOAD_DIR, str(task_id))
     os.makedirs(upload_dir, exist_ok=True)
+    print(f"上传目录: {upload_dir}")
     
     uploaded_files = []
+    file_list = [files]  # 转换为列表以保持后续代码兼容
     
-    for file in files:
+    for file in file_list:
         # 验证文件类型
         if not any(file.filename.lower().endswith(ext) for ext in settings.SUPPORTED_IMAGE_FORMATS):
             raise HTTPException(
@@ -117,9 +123,11 @@ async def upload_images(
     
     db.commit()
     
+    print(f"上传成功: {uploaded_files}")
+    
     return {
-        "message": f"成功上传 {len(uploaded_files)} 个文件",
-        "files": uploaded_files
+        "message": "上传成功",
+        "file": uploaded_files[0] if uploaded_files else None
     }
 
 @router.get("/task/{task_id}")
@@ -152,6 +160,7 @@ async def get_task_images(
         {
             "id": img.id,
             "filename": img.original_filename,
+            "file_path": f"/{img.file_path.replace(chr(92), '/')}" if not img.file_path.startswith('/') else img.file_path.replace(chr(92), '/'),
             "width": img.width,
             "height": img.height,
             "is_annotated": img.is_annotated,
@@ -160,6 +169,85 @@ async def get_task_images(
         }
         for img in images
     ]
+
+@router.get("/task/{task_id}/next-unannotated")
+async def get_next_unannotated_image(
+    task_id: int,
+    current_image_id: int = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取下一张未标注的图像"""
+    from app.models.task_assignment import TaskAssignment
+    from app.models.annotation import Annotation
+    
+    # 验证任务存在
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在"
+        )
+    
+    # 权限检查 - 检查是否在分配列表中
+    is_assigned = db.query(TaskAssignment).filter(
+        TaskAssignment.task_id == task_id,
+        TaskAssignment.user_id == current_user.id
+    ).first() is not None
+    
+    if not is_assigned and task.assignee_id != current_user.id:
+        if current_user.role not in [UserRole.ADMIN, UserRole.ENGINEER]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="权限不足"
+            )
+    
+    # 查询未被当前用户标注的图像
+    # 获取所有图像
+    all_images = db.query(Image).filter(Image.task_id == task_id).order_by(Image.id).all()
+    
+    # 找到下一张未标注的图像
+    for img in all_images:
+        # 跳过当前图像之前的所有图像
+        if current_image_id and img.id <= current_image_id:
+            continue
+        
+        # 检查该图像是否已被当前用户标注
+        user_annotation = db.query(Annotation).filter(
+            Annotation.image_id == img.id,
+            Annotation.annotator_id == current_user.id
+        ).first()
+        
+        if not user_annotation:
+            # 找到未标注的图像
+            return {
+                "id": img.id,
+                "filename": img.original_filename,
+                "file_path": f"/{img.file_path.replace(chr(92), '/')}" if not img.file_path.startswith('/') else img.file_path.replace(chr(92), '/'),
+                "width": img.width,
+                "height": img.height,
+                "task_id": task_id
+            }
+    
+    # 如果没有找到，返回第一张未标注的（从头开始）
+    for img in all_images:
+        user_annotation = db.query(Annotation).filter(
+            Annotation.image_id == img.id,
+            Annotation.annotator_id == current_user.id
+        ).first()
+        
+        if not user_annotation:
+            return {
+                "id": img.id,
+                "filename": img.original_filename,
+                "file_path": f"/{img.file_path.replace(chr(92), '/')}" if not img.file_path.startswith('/') else img.file_path.replace(chr(92), '/'),
+                "width": img.width,
+                "height": img.height,
+                "task_id": task_id
+            }
+    
+    # 所有图像都已标注
+    return None
 
 @router.get("/{image_id}")
 async def get_image(
@@ -182,9 +270,16 @@ async def get_image(
             detail="权限不足"
         )
     
+    # 构建可访问的 URL
+    # 从 file_path 中提取相对路径
+    # file_path 格式: static/uploads/1/xxx.jpg
+    relative_path = image.file_path.replace('\\', '/')  # Windows 兼容
+    image_url = f"/{relative_path}" if not relative_path.startswith('/') else relative_path
+    
     return {
         "id": image.id,
         "filename": image.original_filename,
+        "file_path": image_url,  # 返回可访问的 URL
         "width": image.width,
         "height": image.height,
         "is_annotated": image.is_annotated,

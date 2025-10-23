@@ -1,53 +1,11 @@
 <template>
   <div class="annotate-container">
-    <!-- 工具栏 -->
-    <div class="toolbar">
-      <div class="toolbar-group">
-        <el-button
-          :type="currentTool === 'select' ? 'primary' : 'default'"
-          @click="setTool('select')"
-        >
-          <el-icon><Pointer /></el-icon>
-          选择
-        </el-button>
-        
-        <el-button
-          :type="currentTool === 'bbox' ? 'primary' : 'default'"
-          @click="setTool('bbox')"
-        >
-          <el-icon><Crop /></el-icon>
-          边界框
-        </el-button>
-        
-        <el-button
-          :type="currentTool === 'polygon' ? 'primary' : 'default'"
-          @click="setTool('polygon')"
-        >
-          <el-icon><Edit /></el-icon>
-          多边形
-        </el-button>
-        
-        <el-button
-          :type="currentTool === 'keypoint' ? 'primary' : 'default'"
-          @click="setTool('keypoint')"
-        >
-          <el-icon><Location /></el-icon>
-          关键点
-        </el-button>
+    <!-- 顶部操作栏 -->
+    <div class="top-toolbar">
+      <div class="toolbar-left">
+        <h3>图像标注</h3>
       </div>
-      
-      <div class="toolbar-group">
-        <el-select v-model="selectedLabel" placeholder="选择标签" style="width: 150px">
-          <el-option
-            v-for="label in availableLabels"
-            :key="label"
-            :label="label"
-            :value="label"
-          />
-        </el-select>
-      </div>
-      
-      <div class="toolbar-group">
+      <div class="toolbar-right">
         <el-button @click="undo">
           <el-icon><RefreshLeft /></el-icon>
           撤销
@@ -62,12 +20,10 @@
           <el-icon><Delete /></el-icon>
           清空
         </el-button>
-      </div>
       
-      <div class="toolbar-group">
         <el-button type="success" @click="saveAnnotations">
           <el-icon><Check /></el-icon>
-          保存
+          保存并继续
         </el-button>
         
         <el-button @click="goBack">
@@ -98,39 +54,286 @@
         </div>
       </div>
       
-      <!-- 标注列表 -->
+      <!-- 标注工具面板 -->
       <div class="annotations-panel">
-        <h3>标注列表</h3>
+        <el-tabs v-model="activeAnnotationType" type="card">
+          <!-- 边界框标注 -->
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('bbox')" 
+            label="边界框" 
+            name="bbox"
+          >
+            <div class="annotation-tools">
+              <div class="tool-section">
+                <el-button
+                  :type="currentTool === 'bbox' ? 'primary' : 'default'"
+                  @click="setTool('bbox')"
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-icon><Crop /></el-icon>
+                  绘制边界框
+                </el-button>
+                
+                <el-select 
+                  v-model="selectedLabel" 
+                  placeholder="选择标签" 
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-option
+                    v-for="label in availableLabels"
+                    :key="label"
+                    :label="label"
+                    :value="label"
+                  />
+                </el-select>
+              </div>
+              
+              <el-divider>已标注列表</el-divider>
+              
         <div class="annotations-list">
           <div
-            v-for="(annotation, index) in annotations"
+                  v-for="(annotation, index) in bboxAnnotations"
             :key="index"
             class="annotation-item"
             :class="{ selected: selectedAnnotation === index }"
             @click="selectAnnotation(index)"
           >
             <div class="annotation-info">
-              <span class="annotation-label">{{ annotation.label }}</span>
-              <span class="annotation-type">{{ getAnnotationTypeText(annotation.type) }}</span>
+                    <div class="annotation-label">标签: {{ annotation.label }}</div>
+                  </div>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click.stop="deleteAnnotation(annotations.indexOf(annotation))"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-empty v-if="bboxAnnotations.length === 0" description="暂无边界框标注" />
+              </div>
             </div>
-            <div class="annotation-actions">
+          </el-tab-pane>
+          
+          <!-- 分类标注 -->
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('classification')" 
+            label="分类" 
+            name="classification"
+          >
+            <div class="annotation-tools">
+              <div class="tool-section">
+                <el-select
+                  v-model="classificationValue"
+                  placeholder="选择分类"
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-option
+                    v-for="label in availableLabels"
+                    :key="label"
+                    :label="label"
+                    :value="label"
+                  />
+                </el-select>
+                
+                <el-button
+                  type="primary"
+                  @click="saveClassification"
+                  style="width: 100%"
+                >
+                  添加分类
+                </el-button>
+              </div>
+              
+              <el-divider>已标注列表</el-divider>
+              
+              <div class="annotations-list">
+                <div
+                  v-for="(annotation, index) in classificationAnnotations"
+                  :key="index"
+                  class="annotation-item"
+                >
+                  <div class="annotation-info">
+                    <div class="annotation-label">分类值: {{ annotation.data.value }}</div>
+                  </div>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click.stop="deleteAnnotation(annotations.indexOf(annotation))"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-empty v-if="classificationAnnotations.length === 0" description="暂无分类标注" />
+              </div>
+            </div>
+          </el-tab-pane>
+          
+          <!-- 回归标注 -->
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('regression')" 
+            label="回归" 
+            name="regression"
+          >
+            <div class="annotation-tools">
+              <div class="tool-section">
+                <el-input-number
+                  v-model="regressionValue"
+                  placeholder="输入数值"
+                  style="width: 100%; margin-bottom: 10px"
+                  :precision="2"
+                  controls-position="right"
+                />
+                
+                <el-button
+                  type="primary"
+                  @click="saveRegression"
+                  style="width: 100%"
+                >
+                  添加回归值
+                </el-button>
+              </div>
+              
+              <el-divider>已标注列表</el-divider>
+              
+              <div class="annotations-list">
+                <div
+                  v-for="(annotation, index) in regressionAnnotations"
+                  :key="index"
+                  class="annotation-item"
+                >
+                  <div class="annotation-info">
+                    <div class="annotation-label">数值: {{ annotation.data.value }}</div>
+                  </div>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click.stop="deleteAnnotation(annotations.indexOf(annotation))"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-empty v-if="regressionAnnotations.length === 0" description="暂无回归标注" />
+              </div>
+            </div>
+          </el-tab-pane>
+          
+          <!-- 多边形标注 -->
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('polygon')" 
+            label="多边形" 
+            name="polygon"
+          >
+            <div class="annotation-tools">
+              <div class="tool-section">
+                <el-button
+                  :type="currentTool === 'polygon' ? 'primary' : 'default'"
+                  @click="setTool('polygon')"
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-icon><Edit /></el-icon>
+                  绘制多边形
+                </el-button>
+                
+                <el-select 
+                  v-model="selectedLabel" 
+                  placeholder="选择标签" 
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-option
+                    v-for="label in availableLabels"
+                    :key="label"
+                    :label="label"
+                    :value="label"
+                  />
+                </el-select>
+              </div>
+              
+              <el-divider>已标注列表</el-divider>
+              
+              <div class="annotations-list">
+                <div
+                  v-for="(annotation, index) in polygonAnnotations"
+                  :key="index"
+                  class="annotation-item"
+                >
+                  <div class="annotation-info">
+                    <div class="annotation-label">标签: {{ annotation.label }}</div>
+                  </div>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click.stop="deleteAnnotation(annotations.indexOf(annotation))"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-empty v-if="polygonAnnotations.length === 0" description="暂无多边形标注" />
+              </div>
+            </div>
+          </el-tab-pane>
+          
+          <!-- 关键点标注 -->
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('keypoint')" 
+            label="关键点" 
+            name="keypoint"
+          >
+            <div class="annotation-tools">
+              <div class="tool-section">
+                <el-button
+                  :type="currentTool === 'keypoint' ? 'primary' : 'default'"
+                  @click="setTool('keypoint')"
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-icon><Location /></el-icon>
+                  标记关键点
+                </el-button>
+                
+                <el-select 
+                  v-model="selectedLabel" 
+                  placeholder="选择标签" 
+                  style="width: 100%; margin-bottom: 10px"
+                >
+                  <el-option
+                    v-for="label in availableLabels"
+                    :key="label"
+                    :label="label"
+                    :value="label"
+                  />
+                </el-select>
+              </div>
+              
+              <el-divider>已标注列表</el-divider>
+              
+              <div class="annotations-list">
+                <div
+                  v-for="(annotation, index) in keypointAnnotations"
+                  :key="index"
+                  class="annotation-item"
+                >
+                  <div class="annotation-info">
+                    <div class="annotation-label">标签: {{ annotation.label }}</div>
+                  </div>
               <el-button
                 type="danger"
                 size="small"
-                @click.stop="deleteAnnotation(index)"
+                    @click.stop="deleteAnnotation(annotations.indexOf(annotation))"
               >
                 删除
               </el-button>
             </div>
+                <el-empty v-if="keypointAnnotations.length === 0" description="暂无关键点标注" />
           </div>
         </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { ElMessage } from 'element-plus'
@@ -147,10 +350,14 @@ const annotationCanvas = ref()
 const imageElement = ref()
 
 const currentTool = ref('select')
+const activeAnnotationType = ref('')  // 当前激活的标注类型 Tab
 const selectedLabel = ref('')
 const availableLabels = ref([])
+const availableAnnotationTypes = ref([])  // 任务支持的标注类型
 const annotations = ref([])
 const selectedAnnotation = ref(-1)
+const classificationValue = ref('')  // 分类值
+const regressionValue = ref(0)  // 回归值
 
 const imageUrl = ref('')
 const imageInfo = ref({ width: 0, height: 0 })
@@ -161,6 +368,34 @@ const ctx = ref(null)
 const isDrawing = ref(false)
 const startPoint = ref({ x: 0, y: 0 })
 const currentPoint = ref({ x: 0, y: 0 })
+
+// 计算属性：按类型过滤标注
+const bboxAnnotations = computed(() => {
+  return annotations.value.filter(a => a.type === 'bbox')
+})
+
+const classificationAnnotations = computed(() => {
+  return annotations.value.filter(a => a.type === 'classification')
+})
+
+const regressionAnnotations = computed(() => {
+  return annotations.value.filter(a => a.type === 'regression')
+})
+
+const polygonAnnotations = computed(() => {
+  return annotations.value.filter(a => a.type === 'polygon')
+})
+
+const keypointAnnotations = computed(() => {
+  return annotations.value.filter(a => a.type === 'keypoint')
+})
+
+// 监听 Tab 切换，自动设置工具
+watch(activeAnnotationType, (newType) => {
+  if (newType && newType !== 'select') {
+    setTool(newType)
+  }
+})
 
 const setTool = (tool) => {
   currentTool.value = tool
@@ -176,7 +411,8 @@ const getAnnotationTypeText = (type) => {
     bbox: '边界框',
     polygon: '多边形',
     keypoint: '关键点',
-    classification: '分类'
+    classification: '分类',
+    regression: '回归'
   }
   return typeMap[type] || type
 }
@@ -303,6 +539,40 @@ const addPolygonPoint = (point) => {
   // 多边形标注逻辑
 }
 
+const saveClassification = () => {
+  if (!classificationValue.value) {
+    ElMessage.warning('请选择分类')
+    return
+  }
+  
+  const annotation = {
+    type: 'classification',
+    label: classificationValue.value,
+    data: { value: classificationValue.value },
+    id: Date.now()
+  }
+  
+  annotations.value.push(annotation)
+  ElMessage.success('分类已添加')
+}
+
+const saveRegression = () => {
+  if (regressionValue.value === null || regressionValue.value === undefined) {
+    ElMessage.warning('请输入数值')
+    return
+  }
+  
+  const annotation = {
+    type: 'regression',
+    label: 'regression_value',
+    data: { value: regressionValue.value },
+    id: Date.now()
+  }
+  
+  annotations.value.push(annotation)
+  ElMessage.success('回归值已添加')
+}
+
 const drawBoundingBox = (start, end) => {
   const ctx = annotationCanvas.value.getContext('2d')
   ctx.strokeStyle = '#ff0000'
@@ -398,11 +668,40 @@ const saveAnnotations = async () => {
         image_id: parseInt(imageId),
         annotation_type: annotation.type,
         label: annotation.label,
-        data: annotation.data
+        data: annotation.data,
+        status: 'submitted'  // 标记为已提交
       })
     }
     
     ElMessage.success('标注保存成功')
+    
+    // 获取下一张未标注的图像
+    try {
+      const response = await api.get(`/files/task/${taskId}/next-unannotated`, {
+        params: {
+          current_image_id: parseInt(imageId)
+        }
+      })
+      
+      if (response.data) {
+        ElMessage.success('正在跳转到下一张图像...')
+        // 1秒后跳转到下一张
+        setTimeout(() => {
+          router.push(`/annotate/${taskId}/${response.data.id}`)
+          // 重新加载页面数据
+          window.location.href = `/annotate/${taskId}/${response.data.id}`
+        }, 1000)
+      } else {
+        ElMessage.success('恭喜！所有图像都已标注完成')
+        // 3秒后返回任务详情页
+        setTimeout(() => {
+          router.push(`/tasks/${taskId}`)
+        }, 3000)
+      }
+    } catch (error) {
+      console.error('获取下一张图像失败:', error)
+      // 即使获取失败，也不影响保存成功的提示
+    }
   } catch (error) {
     console.error('保存标注失败:', error)
     ElMessage.error('保存标注失败')
@@ -416,7 +715,19 @@ const goBack = () => {
 const fetchImage = async () => {
   try {
     const response = await api.get(`/files/${imageId}`)
-    imageUrl.value = response.data.file_path
+    const imagePath = response.data.file_path
+    
+    // 构建完整的图像 URL
+    if (imagePath.startsWith('http')) {
+      imageUrl.value = imagePath
+    } else {
+      // 使用当前页面的协议和主机，端口改为8000（后端端口）
+      const protocol = window.location.protocol
+      const hostname = window.location.hostname
+      imageUrl.value = `${protocol}//${hostname}:8000${imagePath}`
+    }
+    
+    console.log('加载图像:', imageUrl.value)
   } catch (error) {
     console.error('获取图像失败:', error)
     ElMessage.error('获取图像失败')
@@ -427,6 +738,21 @@ const fetchTaskLabels = async () => {
   try {
     const response = await api.get(`/tasks/${taskId}`)
     availableLabels.value = response.data.labels || []
+    
+    // 获取支持的标注类型
+    if (response.data.annotation_types && response.data.annotation_types.length > 0) {
+      availableAnnotationTypes.value = response.data.annotation_types
+    } else {
+      // 兼容旧数据，使用 annotation_type
+      availableAnnotationTypes.value = [response.data.annotation_type]
+    }
+    
+    // 默认激活第一个标注类型的 Tab
+    if (availableAnnotationTypes.value.length > 0) {
+      activeAnnotationType.value = availableAnnotationTypes.value[0]
+    }
+    
+    console.log('支持的标注类型:', availableAnnotationTypes.value)
   } catch (error) {
     console.error('获取任务标签失败:', error)
   }
@@ -443,27 +769,28 @@ onMounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  background: #f5f7fa;
 }
 
-.toolbar {
+.top-toolbar {
   display: flex;
+  justify-content: space-between;
   align-items: center;
+  padding: 12px 20px;
+  background: #fff;
+  border-bottom: 1px solid #e4e7ed;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.toolbar-left h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #303133;
+}
+
+.toolbar-right {
+  display: flex;
   gap: 10px;
-  padding: 10px;
-  background: #f5f5f5;
-  border-bottom: 1px solid #ddd;
-}
-
-.toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 10px;
-  border-right: 1px solid #ddd;
-}
-
-.toolbar-group:last-child {
-  border-right: none;
 }
 
 .main-content {
@@ -491,47 +818,91 @@ onMounted(() => {
 }
 
 .annotations-panel {
-  width: 300px;
+  width: 360px;
   background: white;
-  border-left: 1px solid #ddd;
-  padding: 20px;
-  overflow-y: auto;
+  border-left: 1px solid #e4e7ed;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-tools {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.tool-section {
+  margin-bottom: 12px;
 }
 
 .annotations-list {
-  max-height: 400px;
+  flex: 1;
   overflow-y: auto;
+  max-height: calc(100vh - 400px);
 }
 
 .annotation-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid #eee;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: #f5f7fa;
+  border-radius: 6px;
   cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
 }
 
 .annotation-item:hover {
-  background: #f5f5f5;
+  background: #ecf5ff;
+  border-color: #c6e2ff;
 }
 
 .annotation-item.selected {
-  background: #e6f7ff;
-  border-left: 3px solid #1890ff;
+  background: #e3f2fd;
+  border-color: #2196f3;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
 }
 
 .annotation-info {
   flex: 1;
+  margin-right: 10px;
 }
 
 .annotation-label {
-  font-weight: bold;
-  display: block;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #303133;
+  font-size: 14px;
 }
 
-.annotation-type {
+.annotation-value {
   font-size: 12px;
-  color: #666;
+  color: #606266;
+}
+
+:deep(.el-tabs__header) {
+  margin: 0;
+  padding: 0 16px;
+  background: #fafafa;
+}
+
+:deep(.el-tabs__content) {
+  padding: 0;
+  height: calc(100% - 40px);
+  overflow: hidden;
+}
+
+:deep(.el-tab-pane) {
+  height: 100%;
+  overflow-y: auto;
+}
+
+:deep(.el-divider__text) {
+  font-weight: 500;
+  color: #606266;
 }
 </style>

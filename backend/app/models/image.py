@@ -23,8 +23,13 @@ class Image(Base):
     # 标注状态
     is_annotated = Column(Boolean, default=False)
     is_reviewed = Column(Boolean, default=False)
-    annotation_data = Column(JSON)  # 标注数据
+    annotation_data = Column(JSON)  # 标注数据（遗留字段，可能废弃）
     review_notes = Column(Text)     # 审核备注
+    
+    # 多人标注支持
+    annotation_count = Column(Integer, default=0)  # 当前标注数量
+    required_annotation_count = Column(Integer, default=1)  # 需要的标注数量
+    completed_by_users = Column(JSON, default=list)  # 已完成标注的用户ID列表
     
     # 时间信息
     created_at = Column(DateTime(timezone=True), server_default=func.now())
