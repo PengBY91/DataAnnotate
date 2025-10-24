@@ -90,10 +90,17 @@ async def create_annotation(
         if current_user.id not in image.completed_by_users:
             image.completed_by_users.append(current_user.id)
         
+        # 更新标注状态文本
+        if image.annotation_count == 0:
+            image.annotation_status = "未标注"
+        else:
+            image.annotation_status = "标注中"
+        
         # 检查是否达到要求的标注数量
         required_count = image.required_annotation_count or 1
         if image.annotation_count >= required_count:
             image.is_annotated = True
+            image.annotation_status = "待审核"
         
         # 更新任务统计
         if image.task:
@@ -276,6 +283,7 @@ async def review_annotation(
         # 如果所有标注都已通过审核，标记图像为已审核
         if total_annotations > 0 and approved_annotations >= total_annotations:
             image.is_reviewed = True
+            image.annotation_status = "已通过"
             
             # 更新任务统计
             if image.task:
@@ -284,6 +292,8 @@ async def review_annotation(
                     Image.is_reviewed == True
                 ).count()
                 image.task.reviewed_images = reviewed_count
+        elif status == AnnotationStatus.REJECTED:
+            image.annotation_status = "未通过"
     
     db.commit()
     
@@ -330,8 +340,10 @@ async def review_image_annotations(
     # 更新图像的审核状态
     if status == AnnotationStatus.APPROVED:
         image.is_reviewed = True
+        image.annotation_status = "已通过"
     elif status == AnnotationStatus.REJECTED:
         image.is_reviewed = False
+        image.annotation_status = "未通过"
     
     # 更新任务统计
     if image.task:

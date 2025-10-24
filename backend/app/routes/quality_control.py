@@ -29,11 +29,11 @@ async def get_pending_reviews(
     current_user: User = Depends(get_current_user)
 ):
     """获取待审核的标注列表"""
-    # 只有审核员和管理员可以查看待审核列表
-    if current_user.role not in [UserRole.REVIEWER, UserRole.ADMIN]:
+    # 只有管理员可以查看待审核列表
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
+            detail="只有管理员可以访问质量控制"
         )
     
     query = db.query(Annotation).filter(
@@ -46,12 +46,6 @@ async def get_pending_reviews(
     if annotator_id:
         query = query.filter(Annotation.annotator_id == annotator_id)
     
-    # 如果是指定的审核员，只显示分配给自己的任务
-    if current_user.role == UserRole.REVIEWER:
-        query = query.join(Image).join(Task).filter(
-            Task.reviewer_id == current_user.id
-        )
-    
     annotations = query.offset(skip).limit(limit).all()
     
     # 转换为审核格式
@@ -62,13 +56,13 @@ async def get_pending_reviews(
             image_id=annotation.image_id,
             task_id=annotation.image.task_id,
             annotator_id=annotation.annotator_id,
-            annotator_name=annotation.annotator.full_name,
+            annotator_name=annotation.annotator.full_name if annotation.annotator else "未知",
             annotation_type=annotation.annotation_type,
             label=annotation.label,
             data=annotation.data,
             notes=annotation.notes,
             created_at=annotation.created_at,
-            image_filename=annotation.image.filename
+            image_filename=annotation.image.original_filename if annotation.image else "未知"
         )
         reviews.append(review)
     
@@ -81,11 +75,11 @@ async def review_annotation(
     current_user: User = Depends(get_current_user)
 ):
     """审核标注"""
-    # 只有审核员和管理员可以审核
-    if current_user.role not in [UserRole.REVIEWER, UserRole.ADMIN]:
+    # 只有管理员可以审核
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
+            detail="只有管理员可以审核标注"
         )
     
     annotation = db.query(Annotation).filter(
@@ -97,14 +91,6 @@ async def review_annotation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="标注不存在"
         )
-    
-    # 检查权限：审核员只能审核分配给自己的任务
-    if current_user.role == UserRole.REVIEWER:
-        if annotation.image.task.reviewer_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="权限不足"
-            )
     
     # 更新标注状态
     annotation.status = review.status
@@ -159,11 +145,11 @@ async def get_quality_metrics(
     current_user: User = Depends(get_current_user)
 ):
     """获取任务质量指标"""
-    # 只有管理员、算法工程师和审核员可以查看质量指标
-    if current_user.role not in [UserRole.ADMIN, UserRole.ENGINEER, UserRole.REVIEWER]:
+    # 只有管理员可以查看质量指标
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
+            detail="只有管理员可以访问质量控制"
         )
     
     # 获取任务信息
@@ -287,20 +273,12 @@ async def get_review_stats(
     current_user: User = Depends(get_current_user)
 ):
     """获取审核统计信息"""
-    # 只有管理员和审核员可以查看统计
-    if current_user.role not in [UserRole.ADMIN, UserRole.REVIEWER]:
+    # 只有管理员可以查看统计
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
+            detail="只有管理员可以访问质量控制"
         )
-    
-    # 如果是指定审核员，只显示该审核员的统计
-    if reviewer_id and current_user.role == UserRole.REVIEWER:
-        if reviewer_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="权限不足"
-            )
     
     # 计算时间范围
     from datetime import datetime, timedelta

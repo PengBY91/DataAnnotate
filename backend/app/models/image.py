@@ -23,6 +23,7 @@ class Image(Base):
     # 标注状态
     is_annotated = Column(Boolean, default=False)
     is_reviewed = Column(Boolean, default=False)
+    annotation_status = Column(String(50), default="未标注")  # 标注状态文本: 未标注、标注中、待审核、已通过、未通过
     annotation_data = Column(JSON)  # 标注数据（遗留字段，可能废弃）
     review_notes = Column(Text)     # 审核备注
     
