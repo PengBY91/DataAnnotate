@@ -44,6 +44,22 @@
             <el-icon><User /></el-icon>
             <span>用户管理</span>
           </el-menu-item>
+          
+          <el-menu-item 
+            v-if="authStore.hasRole(['admin', 'reviewer'])"
+            index="/quality"
+          >
+            <el-icon><Check /></el-icon>
+            <span>质量控制</span>
+          </el-menu-item>
+          
+          <el-menu-item 
+            v-if="authStore.hasRole(['admin', 'engineer', 'reviewer'])"
+            index="/export"
+          >
+            <el-icon><Download /></el-icon>
+            <span>导出管理</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       

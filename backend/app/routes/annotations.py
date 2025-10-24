@@ -37,11 +37,27 @@ async def create_annotation(
     
     # 检查权限：只有被分配任务的标注员可以创建标注
     if current_user.role == UserRole.ANNOTATOR:
-        if not image.task or image.task.assignee_id != current_user.id:
+        if not image.task:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="权限不足"
             )
+        
+        # 检查旧的分配方式
+        if image.task.assignee_id != current_user.id:
+            # 检查新的分配方式
+            from app.models.task_assignment import TaskAssignment
+            is_assigned = db.query(TaskAssignment).filter(
+                TaskAssignment.task_id == image.task.id,
+                TaskAssignment.user_id == current_user.id,
+                TaskAssignment.role == "annotator"
+            ).first() is not None
+            
+            if not is_assigned:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足"
+                )
     
     db_annotation = Annotation(
         annotation_type=annotation.annotation_type,
@@ -331,6 +347,44 @@ async def review_image_annotations(
         "message": f"已审核 {len(annotations)} 个标注",
         "count": len(annotations),
         "status": status
+    }
+
+@router.delete("/image/{image_id}/rejected")
+async def delete_rejected_annotations(
+    image_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除图像的所有被拒绝的标注"""
+    # 权限检查：只有标注员可以删除自己的被拒绝标注
+    if current_user.role != UserRole.ANNOTATOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有标注员可以删除被拒绝的标注"
+        )
+    
+    # 查找该图像的所有被拒绝的标注
+    rejected_annotations = db.query(Annotation).filter(
+        Annotation.image_id == image_id,
+        Annotation.annotator_id == current_user.id,
+        Annotation.status == AnnotationStatus.REJECTED
+    ).all()
+    
+    if not rejected_annotations:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="没有找到被拒绝的标注"
+        )
+    
+    # 删除所有被拒绝的标注
+    for annotation in rejected_annotations:
+        db.delete(annotation)
+    
+    db.commit()
+    
+    return {
+        "message": f"已删除 {len(rejected_annotations)} 个被拒绝的标注",
+        "deleted_count": len(rejected_annotations)
     }
 
 @router.delete("/{annotation_id}")

@@ -43,6 +43,18 @@ const routes = [
         path: '/profile',
         name: 'Profile',
         component: () => import('@/views/Profile.vue')
+      },
+      {
+        path: '/quality',
+        name: 'QualityControl',
+        component: () => import('@/views/QualityControl.vue'),
+        meta: { requiresRole: ['admin', 'reviewer'] }
+      },
+      {
+        path: '/export',
+        name: 'Export',
+        component: () => import('@/views/Export.vue'),
+        meta: { requiresRole: ['admin', 'engineer', 'reviewer'] }
       }
     ]
   }

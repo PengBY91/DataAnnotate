@@ -62,8 +62,16 @@ async def get_tasks(
     
     # 根据用户角色过滤任务
     if current_user.role == UserRole.ANNOTATOR:
-        # 标注员只能看到分配给自己的任务
-        query = query.filter(Task.assignee_id == current_user.id)
+        # 标注员可以看到分配给自己的任务（包括新的分配系统）
+        query = query.filter(
+            (Task.assignee_id == current_user.id) |
+            (Task.id.in_(
+                db.query(TaskAssignment.task_id).filter(
+                    TaskAssignment.user_id == current_user.id,
+                    TaskAssignment.role == "annotator"
+                )
+            ))
+        )
     elif current_user.role == UserRole.REVIEWER:
         # 审核员可以看到分配给自己的任务
         query = query.filter(Task.reviewer_id == current_user.id)
@@ -171,6 +179,24 @@ async def get_task(
                 completed_images=assignment.completed_images_count
             ))
     
+    # 重新计算统计信息 - 按图像数量计算
+    
+    total_images = db.query(Image).filter(Image.task_id == task_id).count()
+    annotated_images = db.query(Image).filter(
+        Image.task_id == task_id,
+        Image.is_annotated == True
+    ).count()
+    reviewed_images = db.query(Image).filter(
+        Image.task_id == task_id,
+        Image.is_reviewed == True
+    ).count()
+    
+    # 更新任务统计信息
+    task.total_images = total_images
+    task.annotated_images = annotated_images
+    task.reviewed_images = reviewed_images
+    db.commit()
+    
     # 将 task 转换为字典并添加 assignees
     task_dict = {
         "id": task.id,
@@ -187,9 +213,9 @@ async def get_task(
         "creator_id": task.creator_id,
         "assignee_id": task.assignee_id,
         "reviewer_id": task.reviewer_id,
-        "total_images": task.total_images,
-        "annotated_images": task.annotated_images,
-        "reviewed_images": task.reviewed_images,
+        "total_images": total_images,
+        "annotated_images": annotated_images,
+        "reviewed_images": reviewed_images,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
         "assignees": assignees_info

@@ -1,50 +1,55 @@
 version: '3.8'
 
 services:
-  # PostgreSQL数据库
-  db:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: datalabels
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  # Redis缓存
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
   # 后端API服务
   backend:
-    build: ./backend
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://user:password@db:5432/datalabels
-      REDIS_URL: redis://redis:6379
-      SECRET_KEY: your-secret-key-here
+      # 使用SQLite数据库（适合开发环境）
+      DATABASE_URL: sqlite:///./app.db
+      SECRET_KEY: your-secret-key-change-in-production
+      UPLOAD_DIR: /app/static/uploads
     volumes:
-      - ./backend:/app
-      - ./uploads:/app/static/uploads
-    depends_on:
-      - db
-      - redis
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      # 持久化数据库和上传文件
+      - backend_data:/app/static/uploads
+      - backend_db:/app
+    command: >
+      sh -c "
+        python create_admin.py &&
+        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # 前端服务
   frontend:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    command: npm run dev
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
-  postgres_data:
+  backend_data:
+  backend_db:

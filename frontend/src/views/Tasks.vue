@@ -281,11 +281,31 @@ const getPriorityText = (priority) => {
 }
 
 const canStartTask = (task) => {
-  return authStore.user?.id === task.assignee_id && task.status === 'assigned'
+  if (!authStore.user?.id || task.status !== 'assigned') return false
+  
+  // 检查旧的分配方式
+  if (task.assignee_id === authStore.user.id) return true
+  
+  // 检查新的分配方式
+  if (task.assignees && task.assignees.length > 0) {
+    return task.assignees.some(a => a.user_id === authStore.user.id)
+  }
+  
+  return false
 }
 
 const canCompleteTask = (task) => {
-  return authStore.user?.id === task.assignee_id && task.status === 'in_progress'
+  if (!authStore.user?.id || task.status !== 'in_progress') return false
+  
+  // 检查旧的分配方式
+  if (task.assignee_id === authStore.user.id) return true
+  
+  // 检查新的分配方式
+  if (task.assignees && task.assignees.length > 0) {
+    return task.assignees.some(a => a.user_id === authStore.user.id)
+  }
+  
+  return false
 }
 
 const fetchTasks = async () => {

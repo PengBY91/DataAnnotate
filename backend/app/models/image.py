@@ -31,6 +31,9 @@ class Image(Base):
     required_annotation_count = Column(Integer, default=1)  # 需要的标注数量
     completed_by_users = Column(JSON, default=list)  # 已完成标注的用户ID列表
     
+    # 文件夹上传支持
+    folder_relative_path = Column(String(500))  # 文件夹内的相对路径
+    
     # 时间信息
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

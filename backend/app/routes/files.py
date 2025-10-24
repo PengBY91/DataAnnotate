@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.task import Task
 from app.models.image import Image
+from app.models.annotation import Annotation, AnnotationStatus
 from app.utils.auth import get_current_user
 from app.config import settings
 
@@ -148,27 +149,72 @@ async def get_task_images(
         )
     
     # 权限检查
-    if current_user.role == UserRole.ANNOTATOR and task.assignee_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    if current_user.role == UserRole.ANNOTATOR:
+        # 检查旧的分配方式
+        if task.assignee_id != current_user.id:
+            # 检查新的分配方式
+            from app.models.task_assignment import TaskAssignment
+            is_assigned = db.query(TaskAssignment).filter(
+                TaskAssignment.task_id == task_id,
+                TaskAssignment.user_id == current_user.id,
+                TaskAssignment.role == "annotator"
+            ).first() is not None
+            
+            if not is_assigned:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足"
+                )
     
     images = db.query(Image).filter(Image.task_id == task_id).offset(skip).limit(limit).all()
     
-    return [
-        {
+    result = []
+    for img in images:
+        # 获取该图像的所有标注状态
+        annotations = db.query(Annotation).filter(Annotation.image_id == img.id).all()
+        
+        # 统计标注状态
+        annotation_count = len(annotations)
+        has_rejected = any(ann.status == AnnotationStatus.REJECTED for ann in annotations)
+        has_approved = any(ann.status == AnnotationStatus.APPROVED for ann in annotations)
+        has_submitted = any(ann.status == AnnotationStatus.SUBMITTED for ann in annotations)
+        has_draft = any(ann.status == AnnotationStatus.DRAFT for ann in annotations)
+        
+        # 确定图像的整体状态
+        if annotation_count == 0:
+            annotation_status = "未标注"
+        elif has_submitted:
+            # 有待审核的标注，优先显示待审核
+            annotation_status = "待审核"
+        elif has_approved and not has_submitted:
+            # 所有标注都已审核，且没有待审核的
+            if has_rejected:
+                # 有被拒绝的标注，显示未通过
+                annotation_status = "未通过"
+            else:
+                # 所有标注都已通过
+                annotation_status = "已通过"
+        elif has_draft:
+            # 有草稿状态的标注
+            annotation_status = "标注中"
+        else:
+            # 其他情况
+            annotation_status = "标注中"
+        
+        result.append({
             "id": img.id,
             "filename": img.original_filename,
             "file_path": f"/{img.file_path.replace(chr(92), '/')}" if not img.file_path.startswith('/') else img.file_path.replace(chr(92), '/'),
-            "width": img.width,
-            "height": img.height,
             "is_annotated": img.is_annotated,
             "is_reviewed": img.is_reviewed,
+            "annotation_count": annotation_count,
+            "annotation_status": annotation_status,
+            "has_rejected": has_rejected,
+            "folder_relative_path": img.folder_relative_path,  # 添加文件夹相对路径
             "created_at": img.created_at
-        }
-        for img in images
-    ]
+        })
+    
+    return result
 
 @router.get("/task/{task_id}/next-unannotated")
 async def get_next_unannotated_image(
@@ -206,20 +252,25 @@ async def get_next_unannotated_image(
     # 获取所有图像
     all_images = db.query(Image).filter(Image.task_id == task_id).order_by(Image.id).all()
     
-    # 找到下一张未标注的图像
+    # 找到下一张需要标注的图像（未标注或标注被拒绝）
     for img in all_images:
         # 跳过当前图像之前的所有图像
         if current_image_id and img.id <= current_image_id:
             continue
         
-        # 检查该图像是否已被当前用户标注
-        user_annotation = db.query(Annotation).filter(
+        # 检查该图像的标注状态
+        user_annotations = db.query(Annotation).filter(
             Annotation.image_id == img.id,
             Annotation.annotator_id == current_user.id
-        ).first()
+        ).all()
         
-        if not user_annotation:
-            # 找到未标注的图像
+        # 如果没有标注，或者所有标注都被拒绝，则需要标注
+        needs_annotation = (
+            len(user_annotations) == 0 or  # 未标注
+            all(ann.status == AnnotationStatus.REJECTED for ann in user_annotations)  # 所有标注都被拒绝
+        )
+        
+        if needs_annotation:
             return {
                 "id": img.id,
                 "filename": img.original_filename,
@@ -264,11 +315,22 @@ async def get_image(
         )
     
     # 权限检查
-    if current_user.role == UserRole.ANNOTATOR and image.task.assignee_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="权限不足"
-        )
+    if current_user.role == UserRole.ANNOTATOR:
+        # 检查旧的分配方式
+        if image.task.assignee_id != current_user.id:
+            # 检查新的分配方式
+            from app.models.task_assignment import TaskAssignment
+            is_assigned = db.query(TaskAssignment).filter(
+                TaskAssignment.task_id == image.task.id,
+                TaskAssignment.user_id == current_user.id,
+                TaskAssignment.role == "annotator"
+            ).first() is not None
+            
+            if not is_assigned:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="权限不足"
+                )
     
     # 构建可访问的 URL
     # 从 file_path 中提取相对路径
@@ -319,3 +381,106 @@ async def delete_image(
     db.commit()
     
     return {"message": "图像已删除"}
+
+@router.post("/upload-folder")
+async def upload_folder(
+    task_id: int = Form(...),
+    folder_path: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """上传文件夹中的所有图像"""
+    print(f"收到文件夹上传请求: task_id={task_id}, 文件夹路径={folder_path}")
+    
+    # 验证任务存在
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在"
+        )
+    
+    # 权限检查：只有管理员、算法工程师或任务创建者可以上传
+    if current_user.role not in [UserRole.ADMIN, UserRole.ENGINEER]:
+        if task.creator_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="权限不足"
+            )
+    
+    # 检查文件夹是否存在
+    if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="文件夹不存在或不是有效目录"
+        )
+    
+    # 确保上传目录存在
+    upload_dir = os.path.join(settings.UPLOAD_DIR, str(task_id))
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    uploaded_files = []
+    supported_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp']
+    
+    # 遍历文件夹中的所有文件
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            # 检查文件扩展名
+            file_path = os.path.join(root, file)
+            file_ext = os.path.splitext(file)[1].lower()
+            
+            if file_ext not in supported_extensions:
+                continue
+            
+            try:
+                # 计算相对路径（相对于上传的文件夹）
+                relative_path = os.path.relpath(file_path, folder_path)
+                
+                # 生成唯一文件名
+                unique_filename = f"{uuid.uuid4()}{file_ext}"
+                target_path = os.path.join(upload_dir, unique_filename)
+                
+                # 复制文件
+                import shutil
+                shutil.copy2(file_path, target_path)
+                
+                # 获取图像信息
+                if PIL_AVAILABLE:
+                    try:
+                        with PILImage.open(target_path) as img:
+                            width, height = img.size
+                    except Exception:
+                        os.remove(target_path)
+                        continue
+                else:
+                    width, height = 800, 600
+                
+                # 保存到数据库
+                db_image = Image(
+                    task_id=task_id,
+                    original_filename=file,
+                    file_path=target_path,
+                    width=width,
+                    height=height,
+                    folder_relative_path=relative_path  # 记录文件夹内的相对路径
+                )
+                
+                db.add(db_image)
+                uploaded_files.append({
+                    "filename": file,
+                    "relative_path": relative_path,
+                    "width": width,
+                    "height": height
+                })
+                
+            except Exception as e:
+                print(f"处理文件失败 {file_path}: {e}")
+                continue
+    
+    db.commit()
+    
+    return {
+        "message": f"成功上传 {len(uploaded_files)} 个图像文件",
+        "uploaded_files": uploaded_files,
+        "count": len(uploaded_files)
+    }

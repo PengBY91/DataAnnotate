@@ -151,19 +151,24 @@
               width="55"
               :selectable="isImageSelectable"
             />
-            <el-table-column prop="filename" label="文件名" width="200" />
-            <el-table-column prop="width" label="宽度" width="80" />
-            <el-table-column prop="height" label="高度" width="80" />
-            <el-table-column label="标注进度" width="150">
+            <el-table-column label="文件信息" width="300">
               <template #default="{ row }">
                 <div>
-                  <el-tag :type="row.is_annotated ? 'success' : 'info'" size="small">
-                    {{ row.annotation_count || 0 }} / {{ row.required_annotation_count || 1 }}
-                  </el-tag>
-                  <div style="font-size: 11px; color: #999; margin-top: 2px">
-                    {{ row.is_annotated ? '已完成' : '未完成' }}
+                  <div class="filename">{{ row.filename }}</div>
+                  <div v-if="row.folder_relative_path" class="folder-path">
+                    📁 {{ row.folder_relative_path }}
                   </div>
                 </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="标注状态" width="120">
+              <template #default="{ row }">
+                <el-tag 
+                  :type="getAnnotationStatusType(row.annotation_status)" 
+                  size="small"
+                >
+                  {{ row.annotation_status }}
+                </el-tag>
               </template>
             </el-table-column>
             <el-table-column label="审核状态" width="100">
@@ -183,22 +188,6 @@
                   @click="startAnnotate(row.id)"
                 >
                   标注
-                </el-button>
-                <el-button
-                  type="info"
-                  size="small"
-                  @click="previewImage(row)"
-                >
-                  预览
-                </el-button>
-                <!-- 审核按钮：只对管理员显示，且图像已标注未审核 -->
-                <el-button
-                  v-if="canReview && row.is_annotated && !row.is_reviewed"
-                  type="success"
-                  size="small"
-                  @click="openReviewDialog(row)"
-                >
-                  审核
                 </el-button>
                 <!-- 查看按钮：所有人都可以查看已标注的图像 -->
                 <el-button
@@ -629,43 +618,86 @@
     <el-dialog
       v-model="showUploadDialog"
       title="上传图像"
-      width="600px"
+      width="700px"
     >
-      <el-upload
-        ref="uploadRef"
-        name="files"
-        :action="uploadUrl"
-        :headers="uploadHeaders"
-        :data="uploadData"
-        :file-list="fileList"
-        :on-success="handleUploadSuccess"
-        :on-error="handleUploadError"
-        accept="image/*"
-        multiple
-        drag
-      >
-        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-        <div class="el-upload__text">
-          将文件拖到此处，或<em>点击上传</em>
-        </div>
-        <template #tip>
-          <div class="el-upload__tip">
-            支持 jpg/png/bmp/tiff 格式，单个文件不超过50MB
+      <el-tabs v-model="uploadTab" type="card">
+        <el-tab-pane label="单文件上传" name="single">
+          <el-upload
+            ref="uploadRef"
+            name="files"
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :data="uploadData"
+            :file-list="fileList"
+            :on-success="handleUploadSuccess"
+            :on-error="handleUploadError"
+            accept="image/*"
+            multiple
+            drag
+          >
+            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+            <div class="el-upload__text">
+              将文件拖到此处，或<em>点击上传</em>
+            </div>
+            <template #tip>
+              <div class="el-upload__tip">
+                支持 jpg/png/bmp/tiff 格式，单个文件不超过50MB
+              </div>
+            </template>
+          </el-upload>
+        </el-tab-pane>
+        
+        <el-tab-pane label="文件夹上传" name="folder">
+          <div class="folder-upload">
+            <el-form :model="folderForm" label-width="100px">
+              <el-form-item label="文件夹路径">
+                <el-input
+                  v-model="folderForm.path"
+                  placeholder="请输入文件夹路径，如：/path/to/images"
+                  style="width: 100%"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button 
+                  type="primary" 
+                  @click="uploadFolder"
+                  :loading="folderUploading"
+                >
+                  上传文件夹
+                </el-button>
+                <el-button @click="browseFolder">浏览文件夹</el-button>
+              </el-form-item>
+            </el-form>
+            <div class="upload-tip">
+              <el-alert
+                title="文件夹上传说明"
+                type="info"
+                :closable="false"
+                show-icon
+              >
+                <template #default>
+                  <p>• 将递归遍历文件夹中的所有图像文件</p>
+                  <p>• 支持 jpg/png/bmp/tiff/webp 格式</p>
+                  <p>• 会保留文件夹内的相对路径结构</p>
+                </template>
+              </el-alert>
+            </div>
           </div>
-        </template>
-      </el-upload>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 
 const taskId = route.params.id
@@ -695,6 +727,13 @@ const currentImage = ref(null)
 const currentImageAnnotations = ref([])
 const reviewNotes = ref('')
 const selectedImages = ref([])  // 选中的图像列表
+
+// 上传相关
+const uploadTab = ref('single')
+const folderUploading = ref(false)
+const folderForm = reactive({
+  path: ''
+})
 
 const editForm = reactive({
   title: '',
@@ -821,6 +860,17 @@ const getPriorityType = (priority) => {
     urgent: 'danger'
   }
   return priorityMap[priority] || 'info'
+}
+
+const getAnnotationStatusType = (status) => {
+  const typeMap = {
+    '未标注': 'info',
+    '未通过': 'danger',
+    '待审核': 'warning',
+    '已通过': 'success',
+    '标注中': 'primary'
+  }
+  return typeMap[status] || 'info'
 }
 
 const getAnnotationTypes = (task) => {
@@ -1250,7 +1300,11 @@ const completeTask = async () => {
 
 const exportAnnotations = async () => {
   try {
-    ElMessage.info('导出功能开发中')
+    // 跳转到导出页面，并传递任务ID
+    router.push({
+      name: 'Export',
+      query: { task_id: taskId }
+    })
   } catch (error) {
     console.error('导出失败:', error)
   }
@@ -1265,6 +1319,42 @@ const handleUploadSuccess = (response, file) => {
 const handleUploadError = (error, file) => {
   ElMessage.error('上传失败')
   console.error('上传错误:', error)
+}
+
+// 文件夹上传相关函数
+const uploadFolder = async () => {
+  if (!folderForm.path.trim()) {
+    ElMessage.warning('请输入文件夹路径')
+    return
+  }
+  
+  try {
+    folderUploading.value = true
+    
+    const response = await api.post('/files/upload-folder', {
+      task_id: parseInt(taskId),
+      folder_path: folderForm.path
+    })
+    
+    ElMessage.success(`成功上传 ${response.data.count} 个图像文件`)
+    showUploadDialog.value = false
+    folderForm.path = ''
+    
+    // 刷新图像列表和任务信息
+    await fetchImages()
+    await fetchTask()
+  } catch (error) {
+    console.error('文件夹上传失败:', error)
+    ElMessage.error(error.response?.data?.detail || '文件夹上传失败')
+  } finally {
+    folderUploading.value = false
+  }
+}
+
+const browseFolder = () => {
+  // 在浏览器环境中，无法直接访问文件系统
+  // 这里只是提示用户手动输入路径
+  ElMessage.info('请手动输入文件夹路径，如：/home/user/images')
 }
 
 onMounted(() => {
@@ -1334,5 +1424,29 @@ onMounted(() => {
 .action-buttons {
   display: flex;
   flex-direction: column;
+}
+
+.folder-upload {
+  padding: 20px 0;
+}
+
+.upload-tip {
+  margin-top: 20px;
+}
+
+.upload-tip p {
+  margin: 5px 0;
+  font-size: 14px;
+}
+
+.filename {
+  font-weight: 500;
+  color: #303133;
+}
+
+.folder-path {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
 }
 </style>

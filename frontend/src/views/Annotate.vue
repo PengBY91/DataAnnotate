@@ -662,6 +662,14 @@ const clearAll = () => {
 
 const saveAnnotations = async () => {
   try {
+    // 先删除该图像的所有被拒绝的标注
+    try {
+      await api.delete(`/annotations/image/${imageId}/rejected`)
+    } catch (error) {
+      // 如果没有被拒绝的标注，忽略错误
+      console.log('没有需要删除的被拒绝标注')
+    }
+    
     // 保存标注数据
     for (const annotation of annotations.value) {
       await api.post('/annotations', {
