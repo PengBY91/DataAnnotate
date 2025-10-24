@@ -367,6 +367,7 @@ const retryExport = async (exportItem) => {
 // 获取格式名称
 const getFormatName = (format) => {
   const formatMap = {
+    'csv': 'CSV',
     'pascal_voc': 'Pascal VOC',
     'coco': 'COCO',
     'yolo': 'YOLO',
@@ -378,10 +379,11 @@ const getFormatName = (format) => {
 // 获取格式标签
 const getFormatTag = (format) => {
   const tagMap = {
-    'pascal_voc': 'success',
+    'csv': 'success',
+    'pascal_voc': 'info',
     'coco': 'warning',
-    'yolo': 'info',
-    'json': 'primary'
+    'yolo': 'primary',
+    'json': 'danger'
   }
   return tagMap[format] || ''
 }

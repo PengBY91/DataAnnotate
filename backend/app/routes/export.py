@@ -122,6 +122,12 @@ async def get_export_formats():
     return {
         "formats": [
             {
+                "name": "CSV",
+                "value": "csv",
+                "description": "CSV表格格式，适用于数据分析和Excel，每个标注员的最终标注为一行",
+                "extensions": [".csv"]
+            },
+            {
                 "name": "Pascal VOC",
                 "value": "pascal_voc",
                 "description": "Pascal VOC XML格式，适用于目标检测任务",
