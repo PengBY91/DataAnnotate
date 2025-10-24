@@ -574,14 +574,19 @@
             </div>
           </el-col>
           <el-col :span="10">
-            <h4>标注列表</h4>
+            <h4>标注列表（每位标注员的最终标注）</h4>
             <el-table :data="currentImageAnnotations" style="width: 100%" max-height="500">
+              <el-table-column label="标注员" width="100">
+                <template #default="{ row }">
+                  {{ row.annotator?.full_name || '未知' }}
+                </template>
+              </el-table-column>
               <el-table-column label="类型" width="80">
                 <template #default="{ row }">
                   {{ getAnnotationTypeLabel(row.annotation_type) }}
                 </template>
               </el-table-column>
-              <el-table-column prop="label" label="标签" />
+              <el-table-column prop="label" label="标签" width="80" />
               <el-table-column label="状态" width="80">
                 <template #default="{ row }">
                   <el-tag :type="getStatusTagType(row.status)" size="small">

@@ -59,7 +59,7 @@ class Task(Base):
     creator = relationship("User", foreign_keys=[creator_id], back_populates="created_tasks")
     assignee = relationship("User", foreign_keys=[assignee_id], back_populates="assigned_tasks")
     reviewer = relationship("User", foreign_keys=[reviewer_id], back_populates="reviewed_tasks")
-    images = relationship("Image", back_populates="task")
+    images = relationship("Image", back_populates="task", cascade="all, delete-orphan")
     
     # 新增：多对多关系 - 任务分配
     assignments = relationship("TaskAssignment", back_populates="task", cascade="all, delete-orphan")

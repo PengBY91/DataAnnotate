@@ -43,7 +43,7 @@ class Image(Base):
     
     # 关联关系
     task = relationship("Task", back_populates="images")
-    annotations = relationship("Annotation", back_populates="image")
+    annotations = relationship("Annotation", back_populates="image", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Image(id={self.id}, filename='{self.filename}')>"

@@ -105,19 +105,42 @@ async def get_task_stats(
     """获取任务统计信息"""
     # 根据用户角色计算统计信息
     if current_user.role == UserRole.ANNOTATOR:
-        total_tasks = db.query(Task).filter(Task.assignee_id == current_user.id).count()
-        pending_tasks = db.query(Task).filter(
-            Task.assignee_id == current_user.id,
-            Task.status == TaskStatus.PENDING
-        ).count()
-        in_progress_tasks = db.query(Task).filter(
-            Task.assignee_id == current_user.id,
-            Task.status == TaskStatus.IN_PROGRESS
-        ).count()
-        completed_tasks = db.query(Task).filter(
-            Task.assignee_id == current_user.id,
-            Task.status == TaskStatus.COMPLETED
-        ).count()
+        from app.models.task_assignment import TaskAssignment
+        
+        # 查询该标注员参与的所有任务（包括旧的assignee_id和新的TaskAssignment）
+        # 方法1: 通过旧的assignee_id
+        old_assigned_task_ids = db.query(Task.id).filter(Task.assignee_id == current_user.id).all()
+        old_assigned_task_ids = [t[0] for t in old_assigned_task_ids]
+        
+        # 方法2: 通过新的TaskAssignment
+        new_assigned_task_ids = db.query(TaskAssignment.task_id).filter(
+            TaskAssignment.user_id == current_user.id,
+            TaskAssignment.role == "annotator"
+        ).all()
+        new_assigned_task_ids = [t[0] for t in new_assigned_task_ids]
+        
+        # 合并两种方式的任务ID
+        all_task_ids = list(set(old_assigned_task_ids + new_assigned_task_ids))
+        
+        if all_task_ids:
+            total_tasks = db.query(Task).filter(Task.id.in_(all_task_ids)).count()
+            pending_tasks = db.query(Task).filter(
+                Task.id.in_(all_task_ids),
+                Task.status == TaskStatus.PENDING
+            ).count()
+            in_progress_tasks = db.query(Task).filter(
+                Task.id.in_(all_task_ids),
+                Task.status == TaskStatus.IN_PROGRESS
+            ).count()
+            completed_tasks = db.query(Task).filter(
+                Task.id.in_(all_task_ids),
+                Task.status == TaskStatus.COMPLETED
+            ).count()
+        else:
+            total_tasks = 0
+            pending_tasks = 0
+            in_progress_tasks = 0
+            completed_tasks = 0
     else:
         total_tasks = db.query(Task).count()
         pending_tasks = db.query(Task).filter(Task.status == TaskStatus.PENDING).count()
@@ -427,3 +450,44 @@ async def complete_task(
     db.commit()
     
     return {"message": "任务已完成"}
+
+@router.delete("/{task_id}")
+async def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除任务（仅管理员）"""
+    # 权限检查：只有管理员可以删除任务
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有管理员可以删除任务"
+        )
+    
+    # 查找任务
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在"
+        )
+    
+    # 获取统计信息用于返回
+    from app.models.image import Image
+    from app.models.annotation import Annotation
+    
+    image_count = db.query(Image).filter(Image.task_id == task_id).count()
+    annotation_count = db.query(Annotation).join(Image).filter(Image.task_id == task_id).count()
+    
+    # 删除任务（由于设置了cascade，会自动删除关联的images, annotations, assignments等）
+    db.delete(task)
+    db.commit()
+    
+    return {
+        "message": "任务删除成功",
+        "task_id": task_id,
+        "task_title": task.title,
+        "deleted_images": image_count,
+        "deleted_annotations": annotation_count
+    }

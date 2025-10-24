@@ -170,36 +170,59 @@ async def get_task_images(
     
     result = []
     for img in images:
-        # 获取该图像的所有标注状态
-        annotations = db.query(Annotation).filter(Annotation.image_id == img.id).all()
-        
-        # 统计标注状态
-        annotation_count = len(annotations)
-        has_rejected = any(ann.status == AnnotationStatus.REJECTED for ann in annotations)
-        has_approved = any(ann.status == AnnotationStatus.APPROVED for ann in annotations)
-        has_submitted = any(ann.status == AnnotationStatus.SUBMITTED for ann in annotations)
-        has_draft = any(ann.status == AnnotationStatus.DRAFT for ann in annotations)
-        
-        # 确定图像的整体状态
-        if annotation_count == 0:
-            annotation_status = "未标注"
-        elif has_submitted:
-            # 有待审核的标注，优先显示待审核
-            annotation_status = "待审核"
-        elif has_approved and not has_submitted:
-            # 所有标注都已审核，且没有待审核的
-            if has_rejected:
-                # 有被拒绝的标注，显示未通过
-                annotation_status = "未通过"
+        # 如果是标注员，显示自己的标注状态；如果是管理员，显示整体状态
+        if current_user.role == UserRole.ANNOTATOR:
+            # 获取当前标注员对该图像的标注
+            user_annotations = db.query(Annotation).filter(
+                Annotation.image_id == img.id,
+                Annotation.annotator_id == current_user.id
+            ).all()
+            
+            annotation_count = len(user_annotations)
+            
+            # 确定当前标注员的标注状态
+            if annotation_count == 0:
+                annotation_status = "未标注"
+                has_rejected = False
             else:
-                # 所有标注都已通过
-                annotation_status = "已通过"
-        elif has_draft:
-            # 有草稿状态的标注
-            annotation_status = "标注中"
+                # 获取最新的标注状态
+                latest_annotation = max(user_annotations, key=lambda a: a.created_at)
+                if latest_annotation.status == AnnotationStatus.SUBMITTED:
+                    annotation_status = "待审核"
+                    has_rejected = False
+                elif latest_annotation.status == AnnotationStatus.APPROVED:
+                    annotation_status = "已通过"
+                    has_rejected = False
+                elif latest_annotation.status == AnnotationStatus.REJECTED:
+                    annotation_status = "未通过"
+                    has_rejected = True
+                else:
+                    annotation_status = "标注中"
+                    has_rejected = False
         else:
-            # 其他情况
-            annotation_status = "标注中"
+            # 管理员看到的是所有标注的整体状态
+            annotations = db.query(Annotation).filter(Annotation.image_id == img.id).all()
+            
+            annotation_count = len(annotations)
+            has_rejected = any(ann.status == AnnotationStatus.REJECTED for ann in annotations)
+            has_approved = any(ann.status == AnnotationStatus.APPROVED for ann in annotations)
+            has_submitted = any(ann.status == AnnotationStatus.SUBMITTED for ann in annotations)
+            has_draft = any(ann.status == AnnotationStatus.DRAFT for ann in annotations)
+            
+            # 确定图像的整体状态
+            if annotation_count == 0:
+                annotation_status = "未标注"
+            elif has_submitted:
+                annotation_status = "待审核"
+            elif has_approved and not has_submitted:
+                if has_rejected:
+                    annotation_status = "未通过"
+                else:
+                    annotation_status = "已通过"
+            elif has_draft:
+                annotation_status = "标注中"
+            else:
+                annotation_status = "标注中"
         
         result.append({
             "id": img.id,
@@ -210,7 +233,7 @@ async def get_task_images(
             "annotation_count": annotation_count,
             "annotation_status": annotation_status,
             "has_rejected": has_rejected,
-            "folder_relative_path": img.folder_relative_path,  # 添加文件夹相对路径
+            "folder_relative_path": img.folder_relative_path,
             "created_at": img.created_at
         })
     

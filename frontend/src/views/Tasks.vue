@@ -61,7 +61,7 @@
         <el-table-column prop="total_images" label="图像数量" />
         <el-table-column prop="annotated_images" label="已标注" />
         <el-table-column prop="created_at" label="创建时间" />
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="250">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -85,6 +85,14 @@
               @click="completeTask(row.id)"
             >
               完成
+            </el-button>
+            <el-button
+              v-if="canDeleteTask"
+              type="danger"
+              size="small"
+              @click="deleteTask(row)"
+            >
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -191,10 +199,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/utils/api'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const authStore = useAuthStore()
 
@@ -308,6 +316,10 @@ const canCompleteTask = (task) => {
   return false
 }
 
+const canDeleteTask = computed(() => {
+  return authStore.hasRole(['admin'])
+})
+
 const fetchTasks = async () => {
   loading.value = true
   try {
@@ -358,6 +370,30 @@ const completeTask = async (taskId) => {
     fetchTasks()
   } catch (error) {
     console.error('完成任务失败:', error)
+  }
+}
+
+const deleteTask = async (task) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除任务"${task.title}"吗？这将同时删除任务下的所有图像和标注数据，此操作不可恢复！`,
+      '删除任务',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+    
+    await api.delete(`/tasks/${task.id}`)
+    ElMessage.success('任务删除成功')
+    fetchTasks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除任务失败:', error)
+      ElMessage.error(error.response?.data?.detail || '删除任务失败')
+    }
   }
 }
 

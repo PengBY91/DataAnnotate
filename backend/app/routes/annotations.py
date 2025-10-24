@@ -59,6 +59,12 @@ async def create_annotation(
                     detail="权限不足"
                 )
     
+    # 检查该用户是否已经标注过此图像（在插入新标注之前检查）
+    existing_count = db.query(Annotation).filter(
+        Annotation.image_id == annotation.image_id,
+        Annotation.annotator_id == current_user.id
+    ).count()
+    
     db_annotation = Annotation(
         annotation_type=annotation.annotation_type,
         label=annotation.label,
@@ -73,12 +79,6 @@ async def create_annotation(
     
     # 更新图像的标注计数
     from app.models.task_assignment import TaskAssignment
-    
-    # 检查该用户是否已经标注过此图像
-    existing_count = db.query(Annotation).filter(
-        Annotation.image_id == annotation.image_id,
-        Annotation.annotator_id == current_user.id
-    ).count()
     
     # 如果是第一次标注，增加计数
     if existing_count == 0:
@@ -104,12 +104,32 @@ async def create_annotation(
         
         # 更新任务统计
         if image.task:
+            from app.models.task import TaskStatus
+            
+            # 先 flush 确保当前修改被写入数据库
+            db.flush()
+            
             # 更新任务的已标注图像数
             annotated_count = db.query(Image).filter(
                 Image.task_id == image.task_id,
                 Image.is_annotated == True
             ).count()
             image.task.annotated_images = annotated_count
+            
+            # 检查是否所有图像都已标注完成，自动更新任务状态
+            total_images = db.query(Image).filter(Image.task_id == image.task_id).count()
+            print(f"[任务状态更新] 任务ID: {image.task_id}, 总图像: {total_images}, 已标注: {annotated_count}, 当前状态: {image.task.status}")
+            
+            if total_images > 0 and annotated_count >= total_images:
+                # 所有图像都已标注完成
+                if image.task.status in [TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]:
+                    print(f"[任务状态更新] 所有图像已标注完成，更新任务状态: {image.task.status} -> COMPLETED")
+                    image.task.status = TaskStatus.COMPLETED
+            elif annotated_count > 0:
+                # 有部分图像已标注，更新为进行中
+                if image.task.status == TaskStatus.ASSIGNED:
+                    print(f"[任务状态更新] 部分图像已标注，更新任务状态: ASSIGNED -> IN_PROGRESS")
+                    image.task.status = TaskStatus.IN_PROGRESS
             
             # 更新用户的完成计数
             assignment = db.query(TaskAssignment).filter(
@@ -157,13 +177,13 @@ async def get_annotations(
     annotations = query.offset(skip).limit(limit).all()
     return annotations
 
-@router.get("/image/{image_id}", response_model=ImageAnnotation)
+@router.get("/image/{image_id}")
 async def get_image_annotations(
     image_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取图像的所有标注详情"""
+    """获取图像的所有标注详情（每个标注员的最终标注）"""
     image = db.query(Image).filter(Image.id == image_id).first()
     if not image:
         raise HTTPException(
@@ -171,7 +191,47 @@ async def get_image_annotations(
             detail="图像不存在"
         )
     
-    annotations = db.query(Annotation).filter(Annotation.image_id == image_id).all()
+    # 获取所有标注
+    all_annotations = db.query(Annotation).filter(Annotation.image_id == image_id).all()
+    
+    # 按标注员分组，只保留每个标注员的最新标注
+    annotator_latest = {}
+    for ann in all_annotations:
+        annotator_id = ann.annotator_id
+        if annotator_id not in annotator_latest:
+            annotator_latest[annotator_id] = ann
+        else:
+            # 比较创建时间，保留最新的
+            if ann.created_at > annotator_latest[annotator_id].created_at:
+                annotator_latest[annotator_id] = ann
+    
+    # 转换为列表，并包含标注员信息
+    final_annotations = []
+    for ann in annotator_latest.values():
+        # 获取标注员信息
+        annotator = db.query(User).filter(User.id == ann.annotator_id).first()
+        
+        ann_dict = {
+            "id": ann.id,
+            "annotation_type": ann.annotation_type,
+            "label": ann.label,
+            "data": ann.data,
+            "notes": ann.notes,
+            "image_id": ann.image_id,
+            "annotator_id": ann.annotator_id,
+            "annotator": {
+                "id": annotator.id,
+                "full_name": annotator.full_name,
+                "username": annotator.username
+            } if annotator else None,
+            "reviewer_id": ann.reviewer_id,
+            "status": ann.status,
+            "review_notes": ann.review_notes,
+            "created_at": ann.created_at,
+            "updated_at": ann.updated_at,
+            "reviewed_at": ann.reviewed_at
+        }
+        final_annotations.append(ann_dict)
     
     return {
         "image_id": image.id,
@@ -180,7 +240,7 @@ async def get_image_annotations(
         "is_reviewed": image.is_reviewed,
         "annotation_count": image.annotation_count or 0,
         "required_annotation_count": image.required_annotation_count or 1,
-        "annotations": annotations
+        "annotations": final_annotations
     }
 
 @router.get("/{annotation_id}", response_model=AnnotationResponse)
@@ -287,11 +347,23 @@ async def review_annotation(
             
             # 更新任务统计
             if image.task:
+                from app.models.task import TaskStatus
+                
+                # 先 flush 确保当前修改被写入数据库
+                db.flush()
+                
                 reviewed_count = db.query(Image).filter(
                     Image.task_id == image.task_id,
                     Image.is_reviewed == True
                 ).count()
                 image.task.reviewed_images = reviewed_count
+                
+                # 检查是否所有图像都已审核完成，自动更新任务状态
+                total_images = db.query(Image).filter(Image.task_id == image.task_id).count()
+                if total_images > 0 and reviewed_count >= total_images:
+                    # 所有图像都已审核完成
+                    if image.task.status == TaskStatus.COMPLETED:
+                        image.task.status = TaskStatus.REVIEWED
         elif status == AnnotationStatus.REJECTED:
             image.annotation_status = "未通过"
     
@@ -347,11 +419,23 @@ async def review_image_annotations(
     
     # 更新任务统计
     if image.task:
+        from app.models.task import TaskStatus
+        
+        # 先 flush 确保当前修改被写入数据库
+        db.flush()
+        
         reviewed_count = db.query(Image).filter(
             Image.task_id == image.task_id,
             Image.is_reviewed == True
         ).count()
         image.task.reviewed_images = reviewed_count
+        
+        # 检查是否所有图像都已审核完成，自动更新任务状态
+        total_images = db.query(Image).filter(Image.task_id == image.task_id).count()
+        if total_images > 0 and reviewed_count >= total_images:
+            # 所有图像都已审核完成
+            if image.task.status == TaskStatus.COMPLETED:
+                image.task.status = TaskStatus.REVIEWED
     
     db.commit()
     
@@ -382,11 +466,9 @@ async def delete_rejected_annotations(
         Annotation.status == AnnotationStatus.REJECTED
     ).all()
     
+    # 如果没有被拒绝的标注，直接返回成功（而不是抛出错误）
     if not rejected_annotations:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="没有找到被拒绝的标注"
-        )
+        return {"message": "没有需要删除的被拒绝标注", "deleted_count": 0}
     
     # 删除所有被拒绝的标注
     for annotation in rejected_annotations:
