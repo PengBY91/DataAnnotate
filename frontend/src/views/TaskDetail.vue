@@ -426,6 +426,7 @@
             <el-option label="边界框" value="bbox" />
             <el-option label="多边形" value="polygon" />
             <el-option label="关键点" value="keypoint" />
+            <el-option label="排序" value="ranking" />
           </el-select>
         </el-form-item>
         
@@ -438,7 +439,29 @@
           />
         </el-form-item>
         
-        <el-form-item label="标签列表">
+        <!-- 排序类型配置 -->
+        <el-form-item 
+          v-if="editForm.annotation_types && editForm.annotation_types.includes('ranking')"
+          label="排序最大范围"
+        >
+          <el-input-number
+            v-model="editForm.ranking_max"
+            :min="2"
+            :max="20"
+            placeholder="排序最大范围"
+            style="width: 100%"
+            controls-position="right"
+          />
+          <div style="color: #999; font-size: 12px; margin-top: 4px;">
+            设置排序的最大范围（2-20），例如设为3，则标注时可以输入1、2、3的排列
+          </div>
+        </el-form-item>
+        
+        <!-- 非排序类型的标签列表 -->
+        <el-form-item 
+          v-if="!editForm.annotation_types || !editForm.annotation_types.includes('ranking') || editForm.annotation_types.length > 1"
+          label="标签列表"
+        >
           <div>
             <el-tag
               v-for="(label, index) in editForm.labels"
@@ -455,6 +478,9 @@
               style="width: 200px"
               @keyup.enter="addLabelToEdit"
             />
+          </div>
+          <div v-if="editForm.annotation_types && editForm.annotation_types.includes('ranking')" style="color: #999; font-size: 12px; margin-top: 4px;">
+            排序类型使用"排序最大范围"，其他类型使用标签列表
           </div>
         </el-form-item>
         
@@ -749,7 +775,8 @@ const editForm = reactive({
   labels: [],
   instructions: '',
   deadline: null,
-  required_annotations_per_image: 1
+  required_annotations_per_image: 1,
+  ranking_max: 3  // 排序最大范围，默认3
 })
 
 const editRules = {
@@ -1033,6 +1060,14 @@ const handleAssignTask = async () => {
 const openEditDialog = () => {
   if (!task.value) return
   
+  // 获取排序最大范围
+  let rankingMax = 3  // 默认值
+  if (task.value.ranking_config && task.value.ranking_config.max) {
+    rankingMax = task.value.ranking_config.max
+  } else if (task.value.ranking_max) {
+    rankingMax = task.value.ranking_max
+  }
+  
   // 填充编辑表单
   Object.assign(editForm, {
     title: task.value.title || '',
@@ -1045,7 +1080,8 @@ const openEditDialog = () => {
     labels: task.value.labels ? [...task.value.labels] : [],
     instructions: task.value.instructions || '',
     deadline: task.value.deadline ? new Date(task.value.deadline) : null,
-    required_annotations_per_image: task.value.required_annotations_per_image || 1
+    required_annotations_per_image: task.value.required_annotations_per_image || 1,
+    ranking_max: rankingMax
   })
   
   showEditDialog.value = true

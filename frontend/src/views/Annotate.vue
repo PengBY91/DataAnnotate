@@ -217,6 +217,103 @@
             </div>
           </el-tab-pane>
           
+          <!-- 排序标注 -->
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('ranking')" 
+            label="排序" 
+            name="ranking"
+          >
+            <div class="annotation-tools">
+              <div class="tool-section">
+                <el-alert
+                  title="排序说明"
+                  type="info"
+                  :closable="false"
+                  style="margin-bottom: 15px"
+                >
+                  <template #default>
+                    <p style="margin: 0; font-size: 13px;">
+                      请输入排序结果，例如有3个元素需要排序，排序结果是 2、1、3，则输入 "213"。
+                    </p>
+                    <p style="margin: 5px 0 0 0; font-size: 13px; color: #E6A23C;">
+                      排序必须是从1开始的连续数字，不能重复，不能缺失。
+                    </p>
+                  </template>
+                </el-alert>
+                
+                <el-form-item label="排序最大范围">
+                  <el-input-number
+                    v-model="rankingCount"
+                    :min="2"
+                    :max="20"
+                    placeholder="排序最大范围"
+                    style="width: 100%; margin-bottom: 10px"
+                    controls-position="right"
+                    disabled
+                  />
+                  <div style="color: #999; font-size: 12px; margin-top: 4px;">
+                    排序最大范围由任务配置决定，不可修改
+                  </div>
+                </el-form-item>
+                
+                <el-form-item label="排序结果">
+                  <el-input
+                    v-model="rankingValue"
+                    placeholder="例如：213"
+                    style="width: 100%; margin-bottom: 10px"
+                    maxlength="20"
+                    @input="validateRankingInput"
+                  />
+                  <div v-if="rankingError" style="color: #F56C6C; font-size: 12px; margin-top: 4px;">
+                    {{ rankingError }}
+                  </div>
+                  <div v-else style="color: #999; font-size: 12px; margin-top: 4px;">
+                    输入1到{{ rankingCount }}的排列组合
+                  </div>
+                </el-form-item>
+                
+                <el-button
+                  type="primary"
+                  @click="saveRanking"
+                  :disabled="!!rankingError || !rankingValue"
+                  style="width: 100%"
+                >
+                  添加排序
+                </el-button>
+              </div>
+              
+              <el-divider>已标注列表</el-divider>
+              
+              <div class="annotations-list">
+                <div
+                  v-for="(annotation, index) in rankingAnnotations"
+                  :key="index"
+                  class="annotation-item"
+                >
+                  <div class="annotation-info">
+                    <div class="annotation-label">
+                      排序: {{ annotation.data.ranking }} 
+                      <span style="color: #909399; font-size: 12px;">
+                        ({{ annotation.data.expected_count }}个元素)
+                      </span>
+                    </div>
+                    <div class="annotation-display" style="margin-top: 5px; font-size: 12px; color: #606266;">
+                      {{ formatRankingDisplay(annotation.data.ranking) }}
+                    </div>
+                  </div>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click.stop="deleteAnnotation(annotations.indexOf(annotation))"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-empty v-if="rankingAnnotations.length === 0" description="暂无排序标注" />
+              </div>
+            </div>
+          </el-tab-pane>
+          
           <!-- 多边形标注 -->
           <el-tab-pane 
             v-if="availableAnnotationTypes.includes('polygon')" 
@@ -358,6 +455,9 @@ const annotations = ref([])
 const selectedAnnotation = ref(-1)
 const classificationValue = ref('')  // 分类值
 const regressionValue = ref(0)  // 回归值
+const rankingValue = ref('')  // 排序输入值
+const rankingCount = ref(3)  // 排序元素数量
+const rankingError = ref('')  // 排序验证错误信息
 
 const imageUrl = ref('')
 const imageInfo = ref({ width: 0, height: 0 })
@@ -380,6 +480,10 @@ const classificationAnnotations = computed(() => {
 
 const regressionAnnotations = computed(() => {
   return annotations.value.filter(a => a.type === 'regression')
+})
+
+const rankingAnnotations = computed(() => {
+  return annotations.value.filter(a => a.type === 'ranking')
 })
 
 const polygonAnnotations = computed(() => {
@@ -412,7 +516,8 @@ const getAnnotationTypeText = (type) => {
     polygon: '多边形',
     keypoint: '关键点',
     classification: '分类',
-    regression: '回归'
+    regression: '回归',
+    ranking: '排序'
   }
   return typeMap[type] || type
 }
@@ -571,6 +676,97 @@ const saveRegression = () => {
   
   annotations.value.push(annotation)
   ElMessage.success('回归值已添加')
+}
+
+// 验证排序输入
+const validateRankingInput = () => {
+  const value = rankingValue.value.trim()
+  
+  if (!value) {
+    rankingError.value = ''
+    return
+  }
+  
+  // 检查是否只包含数字
+  if (!/^\d+$/.test(value)) {
+    rankingError.value = '排序只能包含数字'
+    return
+  }
+  
+  const numbers = value.split('').map(Number)
+  const count = rankingCount.value
+  
+  // 检查长度
+  if (numbers.length !== count) {
+    rankingError.value = `排序长度应为${count}位`
+    return
+  }
+  
+  // 检查重复
+  if (new Set(numbers).size !== numbers.length) {
+    rankingError.value = '排序不能有重复数字'
+    return
+  }
+  
+  // 检查是否是1到n的排列
+  const expectedSet = new Set(Array.from({ length: count }, (_, i) => i + 1))
+  const actualSet = new Set(numbers)
+  
+  for (let num of actualSet) {
+    if (!expectedSet.has(num)) {
+      rankingError.value = `排序必须是1到${count}的排列`
+      return
+    }
+  }
+  
+  // 检查是否包含0或负数
+  if (numbers.some(n => n <= 0)) {
+    rankingError.value = '排序必须从1开始'
+    return
+  }
+  
+  rankingError.value = ''
+}
+
+// 保存排序标注
+const saveRanking = () => {
+  // 再次验证
+  validateRankingInput()
+  
+  if (rankingError.value) {
+    ElMessage.warning(rankingError.value)
+    return
+  }
+  
+  if (!rankingValue.value) {
+    ElMessage.warning('请输入排序')
+    return
+  }
+  
+  const annotation = {
+    type: 'ranking',
+    label: 'ranking_value',
+    data: { 
+      ranking: rankingValue.value,
+      expected_count: rankingCount.value,
+      ranking_list: rankingValue.value.split('').map(Number)
+    },
+    id: Date.now()
+  }
+  
+  annotations.value.push(annotation)
+  ElMessage.success('排序已添加')
+  
+  // 清空输入
+  rankingValue.value = ''
+  rankingError.value = ''
+}
+
+// 格式化排序显示
+const formatRankingDisplay = (ranking) => {
+  if (!ranking) return ''
+  const numbers = ranking.split('').map(Number)
+  return numbers.map((num, idx) => `第${idx + 1}位: ${num}`).join(', ')
 }
 
 const drawBoundingBox = (start, end) => {
@@ -753,6 +949,14 @@ const fetchTaskLabels = async () => {
     } else {
       // 兼容旧数据，使用 annotation_type
       availableAnnotationTypes.value = [response.data.annotation_type]
+    }
+    
+    // 获取排序配置
+    if (response.data.ranking_config && response.data.ranking_config.max) {
+      rankingCount.value = response.data.ranking_config.max
+    } else if (response.data.ranking_max) {
+      // 兼容直接存储 ranking_max 的情况
+      rankingCount.value = response.data.ranking_max
     }
     
     // 默认激活第一个标注类型的 Tab

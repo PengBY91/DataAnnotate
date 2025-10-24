@@ -11,12 +11,13 @@ class TaskBase(BaseModel):
     description: Optional[str] = None
     priority: TaskPriority = TaskPriority.MEDIUM
     annotation_type: str  # 保留用于兼容
-    annotation_types: Optional[List[str]] = None  # 支持多种标注类型 ['classification', 'regression', 'bbox']
+    annotation_types: Optional[List[str]] = None  # 支持多种标注类型 ['classification', 'regression', 'bbox', 'ranking']
     labels: Optional[List[str]] = None
     instructions: Optional[str] = None
     deadline: Optional[datetime] = None
     required_annotations_per_image: int = 1  # 每张图片需要的标注人数
     auto_assign_images: bool = True  # 是否自动分配图像
+    ranking_max: Optional[int] = 3  # 排序类型的最大范围
 
 class TaskCreate(TaskBase):
     assignee_id: Optional[int] = None
@@ -38,6 +39,7 @@ class TaskUpdate(BaseModel):
     deadline: Optional[datetime] = None
     required_annotations_per_image: Optional[int] = None
     auto_assign_images: Optional[bool] = None
+    ranking_max: Optional[int] = None  # 排序类型的最大范围
 
 class AssigneeInfo(BaseModel):
     """分配用户信息"""
@@ -63,6 +65,7 @@ class TaskResponse(TaskBase):
     updated_at: Optional[datetime] = None
     deadline: Optional[datetime] = None
     assignees: Optional[List[AssigneeInfo]] = None  # 分配的用户列表
+    ranking_config: Optional[Dict[str, Any]] = None  # 排序配置 {'max': 3}
     
     class Config:
         from_attributes = True

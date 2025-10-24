@@ -145,6 +145,7 @@
             <el-option label="分类" value="classification" />
             <el-option label="回归" value="regression" />
             <el-option label="边界框" value="bbox" />
+            <el-option label="排序" value="ranking" />
           </el-select>
           <div style="color: #999; font-size: 12px; margin-top: 4px;">
             可同时选择多种标注类型
@@ -160,7 +161,30 @@
           </el-select>
         </el-form-item>
         
-        <el-form-item label="标签">
+        <!-- 排序类型配置 -->
+        <el-form-item 
+          v-if="createForm.annotation_types && createForm.annotation_types.includes('ranking')"
+          label="排序最大范围"
+          prop="ranking_max"
+        >
+          <el-input-number
+            v-model="createForm.ranking_max"
+            :min="2"
+            :max="20"
+            placeholder="最大范围"
+            style="width: 100%"
+            controls-position="right"
+          />
+          <div style="color: #999; font-size: 12px; margin-top: 4px;">
+            设置排序的最大范围，例如设为3，则标注时可以输入1、2、3的排列（如"213"）
+          </div>
+        </el-form-item>
+        
+        <!-- 非排序类型的标签配置 -->
+        <el-form-item 
+          v-if="!createForm.annotation_types || !createForm.annotation_types.includes('ranking') || createForm.annotation_types.length > 1"
+          label="标签"
+        >
           <el-input
             v-model="labelInput"
             placeholder="输入标签后按回车添加"
@@ -176,6 +200,9 @@
             >
               {{ label }}
             </el-tag>
+          </div>
+          <div v-if="createForm.annotation_types && createForm.annotation_types.includes('ranking')" style="color: #999; font-size: 12px; margin-top: 4px;">
+            排序类型使用"排序最大范围"，其他类型使用标签列表
           </div>
         </el-form-item>
         
@@ -230,7 +257,8 @@ const createForm = reactive({
   annotation_types: [],  // 新字段：多选标注类型
   priority: 'medium',
   labels: [],
-  instructions: ''
+  instructions: '',
+  ranking_max: 3  // 排序类型的最大范围，默认3
 })
 
 const labelInput = ref('')

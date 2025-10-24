@@ -438,6 +438,12 @@ class ExportService:
                 if latest_ann.annotation_type.value == "regression" and latest_ann.data:
                     regression_value = latest_ann.data.get("value", "")
                 
+                # 对于排序，提取排序值
+                ranking_value = ""
+                if latest_ann.annotation_type.value == "ranking" and latest_ann.data:
+                    ranking_value = latest_ann.data.get("ranking", "")
+                    ranking_count = latest_ann.data.get("expected_count", "")
+                
                 csv_data.append({
                     "任务ID": task.id,
                     "任务名称": task.title,
@@ -455,6 +461,8 @@ class ExportService:
                     "边界框高度": bbox_height,
                     "分类值": classification_value,
                     "回归值": regression_value,
+                    "排序值": ranking_value if latest_ann.annotation_type.value == "ranking" else "",
+                    "排序元素数量": ranking_count if latest_ann.annotation_type.value == "ranking" and 'ranking_count' in locals() else "",
                     "原始数据JSON": data_str,
                     "标注备注": latest_ann.notes or "",
                     "标注状态": latest_ann.status.value,

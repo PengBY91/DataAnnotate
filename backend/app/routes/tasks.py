@@ -28,17 +28,26 @@ async def create_task(
             detail="权限不足"
         )
     
+    # 处理排序配置
+    ranking_config = None
+    if task.annotation_types and 'ranking' in task.annotation_types:
+        ranking_config = {'max': task.ranking_max or 3}
+    
     db_task = Task(
         title=task.title,
         description=task.description,
         priority=task.priority,
         annotation_type=task.annotation_type,
+        annotation_types=task.annotation_types,
         labels=task.labels,
         instructions=task.instructions,
         deadline=task.deadline,
         creator_id=current_user.id,
         assignee_id=task.assignee_id,
-        reviewer_id=task.reviewer_id
+        reviewer_id=task.reviewer_id,
+        required_annotations_per_image=task.required_annotations_per_image,
+        auto_assign_images=task.auto_assign_images,
+        ranking_config=ranking_config
     )
     
     db.add(db_task)
@@ -270,6 +279,17 @@ async def update_task(
     
     # 更新任务信息
     update_data = task_update.dict(exclude_unset=True)
+    
+    # 处理排序配置
+    if 'ranking_max' in update_data and update_data.get('annotation_types') and 'ranking' in update_data['annotation_types']:
+        ranking_config = {'max': update_data['ranking_max']}
+        update_data['ranking_config'] = ranking_config
+        # ranking_max不需要存储到数据库，只存储ranking_config
+        del update_data['ranking_max']
+    elif 'ranking_max' in update_data:
+        # 如果没有ranking类型但有ranking_max，删除它
+        del update_data['ranking_max']
+    
     for field, value in update_data.items():
         setattr(task, field, value)
     

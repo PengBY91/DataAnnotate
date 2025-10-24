@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.database import get_db
 from app.models.user import User, UserRole
-from app.models.annotation import Annotation, AnnotationStatus
+from app.models.annotation import Annotation, AnnotationStatus, AnnotationType
 from app.models.image import Image
 from app.schemas.annotation import AnnotationCreate, AnnotationUpdate, AnnotationResponse, ImageAnnotation
 from app.utils.auth import get_current_user
+from app.utils.ranking_validator import validate_ranking, format_ranking
 
 router = APIRouter()
 
@@ -64,6 +65,23 @@ async def create_annotation(
         Annotation.image_id == annotation.image_id,
         Annotation.annotator_id == current_user.id
     ).count()
+    
+    # 如果是排序类型，验证输入合法性
+    if annotation.annotation_type == AnnotationType.RANKING:
+        # 从data中获取ranking字符串
+        ranking_str = annotation.data.get("ranking", "")
+        expected_count = annotation.data.get("expected_count")
+        
+        # 验证排序
+        is_valid, error_msg = validate_ranking(ranking_str, expected_count)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"排序格式错误: {error_msg}"
+            )
+        
+        # 将排序字符串转换为列表存储
+        annotation.data["ranking_list"] = format_ranking(ranking_str)
     
     db_annotation = Annotation(
         annotation_type=annotation.annotation_type,

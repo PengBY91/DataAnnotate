@@ -37,9 +37,10 @@ class Task(Base):
     
     # 任务配置
     annotation_type = Column(String(50), nullable=False)  # bbox, polygon, keypoint, classification（兼容旧数据）
-    annotation_types = Column(JSON)  # 支持多种标注类型 ['classification', 'regression', 'bbox']
+    annotation_types = Column(JSON)  # 支持多种标注类型 ['classification', 'regression', 'bbox', 'ranking']
     labels = Column(JSON)  # 预设标签列表
     instructions = Column(Text)  # 标注说明
+    ranking_config = Column(JSON)  # 排序配置 {'max': 3}，存储排序最大范围
     
     # 多人标注配置
     required_annotations_per_image = Column(Integer, default=1)  # 每张图片需要的标注人数

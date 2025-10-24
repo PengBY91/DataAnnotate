@@ -12,6 +12,8 @@ class AnnotationType(enum.Enum):
     POLYGON = "polygon"     # 多边形
     KEYPOINT = "keypoint"   # 关键点
     CLASSIFICATION = "classification"  # 分类
+    REGRESSION = "regression"  # 回归
+    RANKING = "ranking"     # 排序
 
 class AnnotationStatus(enum.Enum):
     DRAFT = "draft"         # 草稿
