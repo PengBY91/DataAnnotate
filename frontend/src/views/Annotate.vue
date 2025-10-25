@@ -1,63 +1,168 @@
 <template>
-  <div class="annotate-container">
-    <!-- 顶部操作栏 -->
-    <div class="top-toolbar">
-      <div class="toolbar-left">
-        <h3>图像标注</h3>
-      </div>
-      <div class="toolbar-right">
-        <el-button @click="undo">
-          <el-icon><RefreshLeft /></el-icon>
-          撤销
-        </el-button>
-        
-        <el-button @click="redo">
-          <el-icon><RefreshRight /></el-icon>
-          重做
-        </el-button>
-        
-        <el-button @click="clearAll">
-          <el-icon><Delete /></el-icon>
-          清空
-        </el-button>
-      
-        <el-button type="success" @click="saveAnnotations">
-          <el-icon><Check /></el-icon>
-          保存并继续
-        </el-button>
-        
-        <el-button @click="goBack">
+  <div class="annotate-container-fullscreen">
+    <!-- 顶部工具栏 - 压缩为一行 -->
+    <div class="compact-toolbar">
+      <!-- 左侧：返回按钮 -->
+      <div class="toolbar-section">
+        <el-button size="small" @click="goBack">
           <el-icon><Back /></el-icon>
           返回
         </el-button>
       </div>
+      
+      <!-- 中间：标注工具选择 -->
+      <div class="toolbar-section toolbar-center">
+        <el-tabs v-model="activeAnnotationType" type="border-card" size="small" style="flex: 1;">
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('bbox')" 
+            label="边界框" 
+            name="bbox"
+          >
+            <el-select 
+              v-model="selectedLabel" 
+              placeholder="选择标签" 
+              size="small"
+              style="width: 150px; margin-right: 10px;"
+            >
+              <el-option
+                v-for="label in availableLabels"
+                :key="label"
+                :label="label"
+                :value="label"
+              />
+            </el-select>
+            <el-button size="small" :type="currentTool === 'bbox' ? 'primary' : 'default'" @click="setTool('bbox')">
+              绘制边界框
+            </el-button>
+          </el-tab-pane>
+          
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('classification')" 
+            label="分类" 
+            name="classification"
+          >
+            <el-select 
+              v-model="classificationValue" 
+              placeholder="选择分类" 
+              size="small"
+              style="width: 150px; margin-right: 10px;"
+            >
+              <el-option
+                v-for="label in availableLabels"
+                :key="label"
+                :label="label"
+                :value="label"
+              />
+            </el-select>
+            <el-button size="small" type="primary" @click="saveClassification">添加</el-button>
+          </el-tab-pane>
+          
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('regression')" 
+            label="回归" 
+            name="regression"
+          >
+            <el-input-number
+              v-model="regressionValue"
+              size="small"
+              :precision="2"
+              style="width: 150px; margin-right: 10px;"
+            />
+            <el-button size="small" type="primary" @click="saveRegression">添加</el-button>
+          </el-tab-pane>
+          
+          <el-tab-pane 
+            v-if="availableAnnotationTypes.includes('ranking')" 
+            label="排序" 
+            name="ranking"
+          >
+            <span style="margin-right: 10px; font-size: 12px;">最大范围: {{ rankingCount }}</span>
+            <el-input
+              v-model="rankingValue"
+              placeholder="如: 213"
+              size="small"
+              maxlength="20"
+              style="width: 120px; margin-right: 10px;"
+              @input="validateRankingInput"
+            />
+            <el-button size="small" type="primary" @click="saveRanking" :disabled="!!rankingError || !rankingValue">添加</el-button>
+            <span v-if="rankingError" style="color: #F56C6C; font-size: 12px; margin-left: 10px;">{{ rankingError }}</span>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+      
+      <!-- 右侧：操作按钮 -->
+      <div class="toolbar-section">
+        <el-button-group>
+          <el-button size="small" @click="undo" title="撤销">
+            <el-icon><RefreshLeft /></el-icon>
+          </el-button>
+          <el-button size="small" @click="redo" title="重做">
+            <el-icon><RefreshRight /></el-icon>
+          </el-button>
+          <el-button size="small" @click="clearAll" title="清空">
+            <el-icon><Delete /></el-icon>
+          </el-button>
+        </el-button-group>
+        <el-button type="success" size="small" @click="saveAnnotations" style="margin-left: 10px;">
+          <el-icon><Check /></el-icon>
+          保存并继续
+        </el-button>
+      </div>
     </div>
     
-    <div class="main-content">
-      <!-- 图像显示区域 -->
-      <div class="image-container">
-        <div class="image-wrapper" ref="imageWrapper">
-          <canvas
-            ref="annotationCanvas"
-            class="annotation-canvas"
-            @mousedown="handleMouseDown"
-            @mousemove="handleMouseMove"
-            @mouseup="handleMouseUp"
-            @wheel="handleWheel"
-          />
-          <img
-            ref="imageElement"
-            :src="imageUrl"
-            @load="onImageLoad"
-            style="display: none"
-          />
+    <!-- 图像显示区域 - 占满剩余空间 -->
+    <div class="image-container-fullscreen">
+      <div class="image-wrapper" ref="imageWrapper">
+        <canvas
+          ref="annotationCanvas"
+          class="annotation-canvas"
+          @mousedown="handleMouseDown"
+          @mousemove="handleMouseMove"
+          @mouseup="handleMouseUp"
+          @wheel="handleWheel"
+        />
+        <img
+          ref="imageElement"
+          :src="imageUrl"
+          @load="onImageLoad"
+          style="display: none"
+        />
+      </div>
+      
+      <!-- 标注列表悬浮面板 -->
+      <div class="annotations-floating-panel" v-if="annotations.length > 0">
+        <div class="panel-header">
+          已标注 ({{ annotations.length }})
+          <el-button size="small" text @click="showAnnotationList = !showAnnotationList">
+            {{ showAnnotationList ? '收起' : '展开' }}
+          </el-button>
+        </div>
+        <div v-show="showAnnotationList" class="panel-content">
+          <div
+            v-for="(annotation, index) in annotations"
+            :key="index"
+            class="floating-annotation-item"
+            :class="{ selected: selectedAnnotation === index }"
+            @click="selectAnnotation(index)"
+          >
+            <span class="annotation-type-badge">{{ getAnnotationTypeText(annotation.type) }}</span>
+            <span class="annotation-label-text">{{ annotation.label || (annotation.data && annotation.data.value) }}</span>
+            <el-button
+              type="danger"
+              size="small"
+              text
+              @click.stop="deleteAnnotation(index)"
+            >
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
         </div>
       </div>
       
-      <!-- 标注工具面板 -->
-      <div class="annotations-panel">
+      <!-- 废弃的旧代码，保留结构以防编译错误 -->
+      <div style="display: none;">
         <el-tabs v-model="activeAnnotationType" type="card">
-          <!-- 边界框标注 -->
           <el-tab-pane 
             v-if="availableAnnotationTypes.includes('bbox')" 
             label="边界框" 
@@ -458,6 +563,7 @@ const regressionValue = ref(0)  // 回归值
 const rankingValue = ref('')  // 排序输入值
 const rankingCount = ref(3)  // 排序元素数量
 const rankingError = ref('')  // 排序验证错误信息
+const showAnnotationList = ref(true)  // 是否显示标注列表
 
 const imageUrl = ref('')
 const imageInfo = ref({ width: 0, height: 0 })
@@ -977,144 +1083,163 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.annotate-container {
-  height: 100vh;
+/* 全屏容器 - 不使用 MainLayout */
+.annotate-container-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
+  z-index: 999;
 }
 
-.top-toolbar {
+/* 压缩的顶部工具栏 - 一行搞定 */
+.compact-toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
+  justify-content: space-between;
+  padding: 8px 16px;
   background: #fff;
   border-bottom: 1px solid #e4e7ed;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+  height: 56px;
 }
 
-.toolbar-left h3 {
-  margin: 0;
-  font-size: 18px;
-  color: #303133;
-}
-
-.toolbar-right {
+.toolbar-section {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
 }
 
-.main-content {
+.toolbar-center {
   flex: 1;
-  display: flex;
+  max-width: 800px;
+  margin: 0 20px;
 }
 
-.image-container {
+/* 全屏图像容器 */
+.image-container-fullscreen {
   flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #f0f0f0;
-  overflow: auto;
+  background: #2c2c2c;
+  overflow: hidden;
+  position: relative;
 }
 
 .image-wrapper {
   position: relative;
   display: inline-block;
+  max-width: 95%;
+  max-height: 95%;
 }
 
 .annotation-canvas {
-  border: 1px solid #ddd;
+  border: 2px solid #409eff;
   cursor: crosshair;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.annotations-panel {
-  width: 360px;
-  background: white;
-  border-left: 1px solid #e4e7ed;
+/* 悬浮的标注列表面板 */
+.annotations-floating-panel {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 320px;
+  max-height: 400px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   overflow: hidden;
+  backdrop-filter: blur(10px);
+  z-index: 100;
+}
+
+.panel-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
 }
 
-.annotation-tools {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.tool-section {
-  margin-bottom: 12px;
-}
-
-.annotations-list {
-  flex: 1;
+.panel-content {
+  max-height: 350px;
   overflow-y: auto;
-  max-height: calc(100vh - 400px);
+  padding: 8px;
 }
 
-.annotation-item {
+.floating-annotation-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  margin-bottom: 8px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
   background: #f5f7fa;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
-  border: 1px solid transparent;
+  border: 2px solid transparent;
 }
 
-.annotation-item:hover {
+.floating-annotation-item:hover {
   background: #ecf5ff;
-  border-color: #c6e2ff;
+  border-color: #b3d8ff;
 }
 
-.annotation-item.selected {
+.floating-annotation-item.selected {
   background: #e3f2fd;
-  border-color: #2196f3;
-  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
+  border-color: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
 }
 
-.annotation-info {
-  flex: 1;
-  margin-right: 10px;
-}
-
-.annotation-label {
-  font-weight: 500;
-  margin-bottom: 4px;
-  color: #303133;
-  font-size: 14px;
-}
-
-.annotation-value {
+.annotation-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #409eff;
+  color: white;
+  border-radius: 4px;
   font-size: 12px;
-  color: #606266;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.annotation-label-text {
+  flex: 1;
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tab 样式覆盖 */
+:deep(.el-tabs--border-card) {
+  border: none;
+  box-shadow: none;
 }
 
 :deep(.el-tabs__header) {
+  background: transparent;
+  border: none;
   margin: 0;
-  padding: 0 16px;
-  background: #fafafa;
 }
 
 :deep(.el-tabs__content) {
   padding: 0;
-  height: calc(100% - 40px);
-  overflow: hidden;
 }
 
-:deep(.el-tab-pane) {
-  height: 100%;
-  overflow-y: auto;
-}
-
-:deep(.el-divider__text) {
-  font-weight: 500;
-  color: #606266;
+:deep(.el-tabs__item) {
+  padding: 6px 12px;
+  height: auto;
+  line-height: 1.4;
+  font-size: 13px;
 }
 </style>

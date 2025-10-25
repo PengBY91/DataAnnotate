@@ -178,7 +178,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="300">
+            <el-table-column label="操作" width="350">
               <template #default="{ row }">
                 <!-- 标注按钮：只对非管理员显示 -->
                 <el-button
@@ -189,14 +189,22 @@
                 >
                   标注
                 </el-button>
-                <!-- 查看按钮：所有人都可以查看已标注的图像 -->
+                <!-- 查看图像和标注按钮：所有人都可以查看 -->
+                <el-button
+                  type="info"
+                  size="small"
+                  @click="viewImageWithAnnotations(row)"
+                >
+                  查看图像
+                </el-button>
+                <!-- 查看标注详情按钮：已标注的图像才显示 -->
                 <el-button
                   v-if="row.is_annotated"
                   type="warning"
                   size="small"
                   @click="viewAnnotations(row)"
                 >
-                  查看
+                  标注详情
                 </el-button>
               </template>
             </el-table-column>
@@ -634,6 +642,93 @@
       </div>
     </el-dialog>
     
+    <!-- 查看图像和标注对话框 -->
+    <el-dialog
+      v-model="showImageViewDialog"
+      title="查看图像和标注"
+      width="95%"
+      :close-on-click-modal="false"
+    >
+      <div v-if="currentViewImage">
+        <el-row :gutter="20">
+          <!-- 左侧：图像显示 -->
+          <el-col :span="16">
+            <div style="border: 1px solid #ddd; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+              <h4 style="margin: 0 0 10px 0;">{{ currentViewImage.filename }}</h4>
+              <div style="text-align: center; background: white; padding: 10px;">
+                <img 
+                  :src="currentViewImageUrl" 
+                  style="max-width: 100%; max-height: 65vh; object-fit: contain;" 
+                />
+              </div>
+              <div style="margin-top: 10px; color: #666; font-size: 13px;">
+                <span v-if="currentViewImage.folder_relative_path">
+                  📁 路径: {{ currentViewImage.folder_relative_path }}
+                </span>
+              </div>
+            </div>
+          </el-col>
+          
+          <!-- 右侧：标注信息 -->
+          <el-col :span="8">
+            <el-card shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span><strong>标注信息</strong></span>
+                  <el-tag :type="getAnnotationStatusType(currentViewImage.annotation_status)" size="small">
+                    {{ currentViewImage.annotation_status }}
+                  </el-tag>
+                </div>
+              </template>
+              
+              <div style="margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                  <span>标注进度:</span>
+                  <span><strong>{{ currentViewImage.annotation_count || 0 }}</strong> / {{ currentViewImage.required_annotation_count || 1 }}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                  <span>审核状态:</span>
+                  <el-tag :type="currentViewImage.is_reviewed ? 'success' : 'warning'" size="small">
+                    {{ currentViewImage.is_reviewed ? '已审核' : '待审核' }}
+                  </el-tag>
+                </div>
+              </div>
+              
+              <el-divider style="margin: 15px 0;" />
+              
+              <h4 style="margin: 0 0 10px 0;">标注详情</h4>
+              <div v-if="currentViewAnnotations && currentViewAnnotations.length > 0" style="max-height: 50vh; overflow-y: auto;">
+                <div 
+                  v-for="(ann, index) in currentViewAnnotations" 
+                  :key="index"
+                  style="border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 4px; background: #fafafa;"
+                >
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                    <span style="font-weight: bold; color: #409eff;">
+                      {{ ann.annotator?.full_name || '未知标注员' }}
+                    </span>
+                    <el-tag :type="getStatusTagType(ann.status)" size="small">
+                      {{ getStatusText(ann.status) }}
+                    </el-tag>
+                  </div>
+                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">
+                    类型: {{ getAnnotationTypeLabel(ann.annotation_type) }}
+                  </div>
+                  <div style="font-size: 12px; color: #666; margin-bottom: 5px;">
+                    标签: {{ ann.label }}
+                  </div>
+                  <div v-if="ann.data" style="font-size: 11px; color: #999; background: white; padding: 5px; border-radius: 3px; max-height: 100px; overflow-y: auto;">
+                    <pre style="margin: 0;">{{ JSON.stringify(ann.data, null, 2) }}</pre>
+                  </div>
+                </div>
+              </div>
+              <el-empty v-else description="暂无标注数据" :image-size="80" />
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+    </el-dialog>
+    
     <!-- 图像预览对话框 -->
     <el-dialog
       v-model="showPreviewDialog"
@@ -741,7 +836,11 @@ const showAssignDialog = ref(false)
 const showEditDialog = ref(false)
 const showReviewDialog = ref(false)
 const showViewDialog = ref(false)
+const showImageViewDialog = ref(false)
 const previewImageUrl = ref('')
+const currentViewImage = ref(null)
+const currentViewImageUrl = ref('')
+const currentViewAnnotations = ref([])
 const fileList = ref([])
 const users = ref([])
 const annotators = ref([])
@@ -1192,35 +1291,6 @@ const openReviewDialog = async (image) => {
   }
 }
 
-const viewAnnotations = async (image) => {
-  try {
-    currentImage.value = image
-    
-    // 获取图像的所有标注
-    const response = await api.get(`/annotations/image/${image.id}`)
-    currentImageAnnotations.value = response.data.annotations || []
-    
-    // 获取图像URL但不显示预览弹窗
-    const imageResponse = await api.get(`/files/${image.id}`)
-    const imagePath = imageResponse.data.file_path
-    
-    // 如果路径已经是完整URL，直接使用；否则添加后端基础URL
-    if (imagePath.startsWith('http')) {
-      previewImageUrl.value = imagePath
-    } else {
-      const protocol = window.location.protocol
-      const hostname = window.location.hostname
-      previewImageUrl.value = `${protocol}//${hostname}:8000${imagePath}`
-    }
-    
-    // 只显示查看标注对话框
-    showViewDialog.value = true
-  } catch (error) {
-    console.error('获取标注失败:', error)
-    ElMessage.error('获取标注失败')
-  }
-}
-
 const handleReview = async (reviewStatus) => {
   if (!currentImage.value) return
   
@@ -1396,6 +1466,67 @@ const browseFolder = () => {
   // 在浏览器环境中，无法直接访问文件系统
   // 这里只是提示用户手动输入路径
   ElMessage.info('请手动输入文件夹路径，如：/home/user/images')
+}
+
+// 查看图像和标注
+const viewImageWithAnnotations = async (image) => {
+  try {
+    currentViewImage.value = image
+    
+    // 获取图像URL
+    const response = await api.get(`/files/${image.id}`)
+    const imagePath = response.data.file_path
+    
+    if (imagePath.startsWith('http')) {
+      currentViewImageUrl.value = imagePath
+    } else {
+      const protocol = window.location.protocol
+      const hostname = window.location.hostname
+      currentViewImageUrl.value = `${protocol}//${hostname}:8000${imagePath}`
+    }
+    
+    // 获取标注数据
+    if (image.is_annotated) {
+      const annResponse = await api.get(`/annotations/image/${image.id}`)
+      currentViewAnnotations.value = annResponse.data.annotations || []
+    } else {
+      currentViewAnnotations.value = []
+    }
+    
+    showImageViewDialog.value = true
+  } catch (error) {
+    console.error('获取图像信息失败:', error)
+    ElMessage.error('获取图像信息失败')
+  }
+}
+
+// 查看标注详情
+const viewAnnotations = async (image) => {
+  try {
+    currentImage.value = image
+    
+    // 获取标注数据
+    const response = await api.get(`/annotations/image/${image.id}`)
+    currentImageAnnotations.value = response.data.annotations || []
+    
+    // 获取图像URL用于预览
+    const imageResponse = await api.get(`/files/${image.id}`)
+    const imagePath = imageResponse.data.file_path
+    
+    if (imagePath.startsWith('http')) {
+      previewImageUrl.value = imagePath
+    } else {
+      const protocol = window.location.protocol
+      const hostname = window.location.hostname
+      previewImageUrl.value = `${protocol}//${hostname}:8000${imagePath}`
+    }
+    
+    // 只显示查看标注对话框
+    showViewDialog.value = true
+  } catch (error) {
+    console.error('获取标注失败:', error)
+    ElMessage.error('获取标注失败')
+  }
 }
 
 onMounted(() => {

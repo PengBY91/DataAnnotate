@@ -9,6 +9,12 @@ const routes = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/annotate/:taskId/:imageId',
+    name: 'Annotate',
+    component: () => import('@/views/Annotate.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
@@ -27,11 +33,6 @@ const routes = [
         path: '/tasks/:id',
         name: 'TaskDetail',
         component: () => import('@/views/TaskDetail.vue')
-      },
-      {
-        path: '/annotate/:taskId/:imageId',
-        name: 'Annotate',
-        component: () => import('@/views/Annotate.vue')
       },
       {
         path: '/users',
