@@ -40,24 +40,28 @@
 .image-container-fullscreen {
   flex: 1;
   display: flex;
-  justify-content: center;
-  align-items: center;
+  flex-direction: column;
   background: #2c2c2c;
-  overflow: hidden;
+  overflow: auto; /* 允许垂直滚动 */
   position: relative;
+  padding: 20px;
+  align-items: center;
 }
 
 .image-wrapper {
   position: relative;
-  display: inline-block;
-  max-width: 95%;
-  max-height: 95%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
 }
 
 .annotation-canvas {
   border: 2px solid #409eff;
   cursor: crosshair;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  display: block;
+  /* 宽度和高度由 JS 动态设置，以确保正确的宽高比 */
 }
 
 /* 悬浮的标注列表面板 */

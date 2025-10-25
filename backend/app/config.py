@@ -22,7 +22,16 @@ class Settings:
     
     # 文件存储配置
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "static/uploads")
+    THUMBNAIL_DIR = os.getenv("THUMBNAIL_DIR", "static/thumbnails")
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    
+    # 缩略图配置
+    THUMBNAIL_SIZE = (300, 300)  # 缩略图尺寸
+    THUMBNAIL_QUALITY = 85  # 缩略图质量 (1-100)
+    
+    # 存储优化配置
+    FILES_PER_DIRECTORY = 1000  # 每个目录最多存储的文件数
+    USE_HASH_DIRECTORY = True  # 是否使用hash分散存储
     
     # Redis配置（用于缓存和任务队列）
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")

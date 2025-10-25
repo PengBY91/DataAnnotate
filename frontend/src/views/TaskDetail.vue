@@ -1079,7 +1079,16 @@ const fetchImages = async () => {
   imagesLoading.value = true
   try {
     const response = await api.get(`/files/task/${taskId}`)
-    images.value = response.data
+    // 适配新的分页API响应格式：{ total, skip, limit, has_more, images: [...] }
+    // 如果是新格式，取 images 字段；如果是旧格式（直接返回数组），直接使用
+    if (response.data && Array.isArray(response.data.images)) {
+      images.value = response.data.images
+    } else if (Array.isArray(response.data)) {
+      images.value = response.data
+    } else {
+      console.error('意外的响应格式:', response.data)
+      images.value = []
+    }
   } catch (error) {
     console.error('获取图像列表失败:', error)
     ElMessage.error('获取图像列表失败')

@@ -70,10 +70,14 @@ async def create_annotation(
     if annotation.annotation_type == AnnotationType.RANKING:
         # 从data中获取ranking字符串
         ranking_str = annotation.data.get("ranking", "")
-        expected_count = annotation.data.get("expected_count")
         
-        # 验证排序
-        is_valid, error_msg = validate_ranking(ranking_str, expected_count)
+        # 获取任务的排序最大范围配置
+        max_range = None
+        if image.task and image.task.ranking_config:
+            max_range = image.task.ranking_config.get("max")
+        
+        # 验证排序（允许小于max_range的排序）
+        is_valid, error_msg = validate_ranking(ranking_str, max_range)
         if not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -82,6 +86,8 @@ async def create_annotation(
         
         # 将排序字符串转换为列表存储
         annotation.data["ranking_list"] = format_ranking(ranking_str)
+        # 记录实际的排序长度
+        annotation.data["actual_count"] = len(format_ranking(ranking_str))
     
     db_annotation = Annotation(
         annotation_type=annotation.annotation_type,

@@ -79,7 +79,7 @@
             <span style="margin-right: 10px; font-size: 12px;">最大范围: {{ rankingCount }}</span>
             <el-input
               v-model="rankingValue"
-              placeholder="如: 213"
+              placeholder="如: 213 或 21"
               size="small"
               maxlength="20"
               style="width: 120px; margin-right: 10px;"
@@ -87,6 +87,7 @@
             />
             <el-button size="small" type="primary" @click="saveRanking" :disabled="!!rankingError || !rankingValue">添加</el-button>
             <span v-if="rankingError" style="color: #F56C6C; font-size: 12px; margin-left: 10px;">{{ rankingError }}</span>
+            <span v-else-if="rankingValue" style="color: #67C23A; font-size: 12px; margin-left: 10px;">✓ 有效</span>
           </el-tab-pane>
         </el-tabs>
       </div>
@@ -120,7 +121,6 @@
           @mousedown="handleMouseDown"
           @mousemove="handleMouseMove"
           @mouseup="handleMouseUp"
-          @wheel="handleWheel"
         />
         <img
           ref="imageElement"
@@ -338,10 +338,10 @@
                 >
                   <template #default>
                     <p style="margin: 0; font-size: 13px;">
-                      请输入排序结果，例如有3个元素需要排序，排序结果是 2、1、3，则输入 "213"。
+                      请输入排序结果。例如：有3个元素排序结果是 2、1、3，则输入 "213"；有2个元素排序结果是 2、1，则输入 "21"。
                     </p>
                     <p style="margin: 5px 0 0 0; font-size: 13px; color: #E6A23C;">
-                      排序必须是从1开始的连续数字，不能重复，不能缺失。
+                      排序必须是从1开始的连续数字，不能重复，不能缺失，长度不超过最大范围。
                     </p>
                   </template>
                 </el-alert>
@@ -373,7 +373,7 @@
                     {{ rankingError }}
                   </div>
                   <div v-else style="color: #999; font-size: 12px; margin-top: 4px;">
-                    输入1到{{ rankingCount }}的排列组合
+                    可输入1到{{ rankingCount }}之间任意长度的排列，如"21"、"132"等
                   </div>
                 </el-form-item>
                 
@@ -629,14 +629,39 @@ const getAnnotationTypeText = (type) => {
   return typeMap[type] || type
 }
 
+// 调整canvas显示尺寸
+const resizeCanvas = () => {
+  const img = imageElement.value
+  const container = imageWrapper.value
+  const canvas = annotationCanvas.value
+  
+  if (!img || !container || !canvas || !imageInfo.value.width) return
+  
+  // 计算显示尺寸：宽度占满容器，高度按比例缩放
+  const containerWidth = container.clientWidth
+  const aspectRatio = imageInfo.value.height / imageInfo.value.width
+  const displayHeight = containerWidth * aspectRatio
+  
+  // 设置canvas的显示尺寸（CSS样式）
+  canvas.style.width = '100%'
+  canvas.style.height = `${displayHeight}px`
+  
+  // 重新绘制
+  redrawCanvas()
+}
+
 const onImageLoad = () => {
   const img = imageElement.value
+  const container = imageWrapper.value
+  
+  if (!img || !container) return
+  
   imageInfo.value = {
     width: img.naturalWidth,
     height: img.naturalHeight
   }
   
-  // 设置画布大小
+  // 设置画布的实际尺寸（用于精确绘制，分辨率）
   const canvas = annotationCanvas.value
   canvas.width = img.naturalWidth
   canvas.height = img.naturalHeight
@@ -647,14 +672,35 @@ const onImageLoad = () => {
   
   // 绘制现有标注
   drawAnnotations()
+  
+  // 调整显示尺寸
+  resizeCanvas()
+}
+
+// 将鼠标坐标从显示坐标转换为canvas实际坐标
+const getCanvasCoordinates = (event) => {
+  const canvas = annotationCanvas.value
+  const rect = canvas.getBoundingClientRect()
+  
+  // 鼠标在canvas显示区域中的位置
+  const displayX = event.clientX - rect.left
+  const displayY = event.clientY - rect.top
+  
+  // 计算缩放比例
+  const scaleX = canvas.width / rect.width
+  const scaleY = canvas.height / rect.height
+  
+  // 转换为canvas实际坐标
+  const canvasX = displayX * scaleX
+  const canvasY = displayY * scaleY
+  
+  return { x: canvasX, y: canvasY }
 }
 
 const handleMouseDown = (event) => {
   if (currentTool.value === 'select') return
   
-  const rect = annotationCanvas.value.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
+  const { x, y } = getCanvasCoordinates(event)
   
   startPoint.value = { x, y }
   isDrawing.value = true
@@ -667,9 +713,7 @@ const handleMouseDown = (event) => {
 const handleMouseMove = (event) => {
   if (!isDrawing.value || currentTool.value === 'keypoint') return
   
-  const rect = annotationCanvas.value.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
+  const { x, y } = getCanvasCoordinates(event)
   
   currentPoint.value = { x, y }
   
@@ -685,9 +729,7 @@ const handleMouseMove = (event) => {
 const handleMouseUp = (event) => {
   if (!isDrawing.value) return
   
-  const rect = annotationCanvas.value.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
+  const { x, y } = getCanvasCoordinates(event)
   
   if (currentTool.value === 'bbox') {
     addBoundingBox(startPoint.value, { x, y })
@@ -696,11 +738,6 @@ const handleMouseUp = (event) => {
   }
   
   isDrawing.value = false
-}
-
-const handleWheel = (event) => {
-  event.preventDefault()
-  // 实现缩放功能
 }
 
 const addBoundingBox = (start, end) => {
@@ -785,7 +822,7 @@ const saveRegression = () => {
   ElMessage.success('回归值已添加')
 }
 
-// 验证排序输入
+// 验证排序输入（新逻辑：允许小于最大范围的排序）
 const validateRankingInput = () => {
   const value = rankingValue.value.trim()
   
@@ -801,11 +838,18 @@ const validateRankingInput = () => {
   }
   
   const numbers = value.split('').map(Number)
-  const count = rankingCount.value
+  const actualLength = numbers.length
+  const maxRange = rankingCount.value
   
-  // 检查长度
-  if (numbers.length !== count) {
-    rankingError.value = `排序长度应为${count}位`
+  // 检查长度不超过最大范围
+  if (actualLength > maxRange) {
+    rankingError.value = `排序长度不能超过最大范围${maxRange}`
+    return
+  }
+  
+  // 检查长度至少为1
+  if (actualLength < 1) {
+    rankingError.value = '排序至少需要1个元素'
     return
   }
   
@@ -815,21 +859,29 @@ const validateRankingInput = () => {
     return
   }
   
-  // 检查是否是1到n的排列
-  const expectedSet = new Set(Array.from({ length: count }, (_, i) => i + 1))
-  const actualSet = new Set(numbers)
-  
-  for (let num of actualSet) {
-    if (!expectedSet.has(num)) {
-      rankingError.value = `排序必须是1到${count}的排列`
-      return
-    }
-  }
-  
   // 检查是否包含0或负数
   if (numbers.some(n => n <= 0)) {
     rankingError.value = '排序必须从1开始'
     return
+  }
+  
+  // 核心验证：必须是从1到actualLength的排列（不能跳过数字）
+  // 例如：213是1-3的排列（合法），124不是（缺少2，非法），21是1-2的排列（合法）
+  const expectedSet = new Set(Array.from({ length: actualLength }, (_, i) => i + 1))
+  const actualSet = new Set(numbers)
+  
+  for (let i = 1; i <= actualLength; i++) {
+    if (!actualSet.has(i)) {
+      rankingError.value = `排序必须是从1开始的连续数字，不能跳过。缺少: ${i}`
+      return
+    }
+  }
+  
+  for (let num of actualSet) {
+    if (num > actualLength) {
+      rankingError.value = `包含超出范围的数字: ${num}，当前长度为${actualLength}`
+      return
+    }
   }
   
   rankingError.value = ''
@@ -1080,5 +1132,13 @@ const fetchTaskLabels = async () => {
 onMounted(() => {
   fetchImage()
   fetchTaskLabels()
+  
+  // 添加窗口大小改变监听器
+  window.addEventListener('resize', resizeCanvas)
+})
+
+onUnmounted(() => {
+  // 移除窗口大小改变监听器
+  window.removeEventListener('resize', resizeCanvas)
 })
 </script>

@@ -1,17 +1,19 @@
 """
 文件管理API路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import os
 import uuid
+from datetime import datetime
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.task import Task
 from app.models.image import Image
 from app.models.annotation import Annotation, AnnotationStatus
 from app.utils.auth import get_current_user
+from app.utils.image_optimizer import ImageOptimizer
 from app.config import settings
 
 # 尝试导入PIL，如果失败则使用替代方案
@@ -22,6 +24,51 @@ except ImportError:
     PIL_AVAILABLE = False
 
 router = APIRouter()
+
+def generate_unique_filename(original_filename: str, upload_dir: str, folder_path: str = None) -> tuple:
+    """
+    生成唯一且可读的文件名
+    
+    Args:
+        original_filename: 原始文件名
+        upload_dir: 上传目录
+        folder_path: 文件夹相对路径（可选）
+    
+    Returns:
+        (unique_filename, display_name): 唯一文件名和显示名称
+    """
+    # 分离文件名和扩展名
+    name_without_ext, file_extension = os.path.splitext(original_filename)
+    
+    # 构建基础文件名
+    if folder_path:
+        # 将文件夹路径转换为合法的文件名部分
+        folder_part = folder_path.replace('/', '_').replace('\\', '_').strip('_')
+        base_name = f"{folder_part}_{name_without_ext}"
+    else:
+        base_name = name_without_ext
+    
+    # 清理文件名中的非法字符
+    base_name = "".join(c for c in base_name if c.isalnum() or c in ('_', '-', '.'))
+    
+    # 添加时间戳确保唯一性
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]  # 精确到毫秒
+    unique_filename = f"{base_name}_{timestamp}{file_extension}"
+    
+    # 确保文件不存在（极少情况下可能重复）
+    counter = 1
+    final_filename = unique_filename
+    while os.path.exists(os.path.join(upload_dir, final_filename)):
+        final_filename = f"{base_name}_{timestamp}_{counter}{file_extension}"
+        counter += 1
+    
+    # 显示名称（如果有文件夹路径，包含完整路径）
+    if folder_path:
+        display_name = f"{folder_path}/{original_filename}"
+    else:
+        display_name = original_filename
+    
+    return final_filename, display_name
 
 @router.post("/upload")
 async def upload_images(
@@ -51,11 +98,6 @@ async def upload_images(
                 detail="权限不足"
             )
     
-    # 确保上传目录存在
-    upload_dir = os.path.join(settings.UPLOAD_DIR, str(task_id))
-    os.makedirs(upload_dir, exist_ok=True)
-    print(f"上传目录: {upload_dir}")
-    
     uploaded_files = []
     file_list = [files]  # 转换为列表以保持后续代码兼容
     
@@ -74,38 +116,46 @@ async def upload_images(
                 detail=f"文件过大: {file.filename}"
             )
         
-        # 生成唯一文件名
-        file_extension = os.path.splitext(file.filename)[1]
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        file_path = os.path.join(upload_dir, unique_filename)
+        # 生成唯一且可读的文件名
+        unique_filename, display_name = generate_unique_filename(
+            original_filename=file.filename,
+            upload_dir=settings.UPLOAD_DIR,
+            folder_path=None
+        )
+        
+        # 使用分级目录存储
+        relative_dir, file_path = ImageOptimizer.get_storage_path(
+            task_id=task_id,
+            filename=unique_filename,
+            use_hash=True
+        )
         
         # 保存文件
+        content = await file.read()
         with open(file_path, "wb") as buffer:
-            content = await file.read()
             buffer.write(content)
         
         # 获取图像信息
-        if PIL_AVAILABLE:
-            try:
-                with PILImage.open(file_path) as img:
-                    width, height = img.size
-            except Exception:
-                # 如果无法读取图像信息，删除文件
-                os.remove(file_path)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"无法读取图像文件: {file.filename}"
-                )
-        else:
-            # 如果没有PIL，使用默认值
-            width, height = 800, 600
+        image_info = ImageOptimizer.get_image_info(file_path)
+        if not image_info:
+            os.remove(file_path)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无法读取图像文件: {file.filename}"
+            )
+        
+        width, height, file_size = image_info
+        
+        # 生成缩略图
+        thumbnail_path = ImageOptimizer.get_thumbnail_path(file_path, task_id)
+        thumbnail_generated = ImageOptimizer.generate_thumbnail(file_path, thumbnail_path)
         
         # 保存到数据库
         db_image = Image(
             filename=unique_filename,
             original_filename=file.filename,
             file_path=file_path,
-            file_size=len(content),
+            file_size=file_size,
             width=width,
             height=height,
             task_id=task_id
@@ -115,8 +165,9 @@ async def upload_images(
         uploaded_files.append({
             "filename": file.filename,
             "saved_filename": unique_filename,
-            "size": len(content),
-            "dimensions": f"{width}x{height}"
+            "size": file_size,
+            "dimensions": f"{width}x{height}",
+            "has_thumbnail": thumbnail_generated
         })
     
     # 更新任务图像数量
@@ -134,12 +185,19 @@ async def upload_images(
 @router.get("/task/{task_id}")
 async def get_task_images(
     task_id: int,
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0, description="跳过的记录数"),
+    limit: int = Query(20, ge=1, le=100, description="返回的记录数"),
+    use_thumbnail: bool = Query(True, description="是否使用缩略图URL"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取任务的图像列表"""
+    """
+    获取任务的图像列表（支持分页）
+    
+    - skip: 跳过的记录数，用于分页
+    - limit: 每页返回的记录数，最大100
+    - use_thumbnail: 是否在列表中使用缩略图URL（节省带宽）
+    """
     # 验证任务存在
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -166,6 +224,10 @@ async def get_task_images(
                     detail="权限不足"
                 )
     
+    # 查询总数（用于分页）
+    total_count = db.query(Image).filter(Image.task_id == task_id).count()
+    
+    # 分页查询
     images = db.query(Image).filter(Image.task_id == task_id).offset(skip).limit(limit).all()
     
     result = []
@@ -224,20 +286,45 @@ async def get_task_images(
             else:
                 annotation_status = "标注中"
         
+        # 准备文件路径
+        file_path = f"/{img.file_path.replace(chr(92), '/')}" if not img.file_path.startswith('/') else img.file_path.replace(chr(92), '/')
+        
+        # 如果使用缩略图，尝试生成缩略图URL
+        if use_thumbnail:
+            thumbnail_path = ImageOptimizer.get_thumbnail_path(img.file_path, task_id)
+            if os.path.exists(thumbnail_path):
+                # 缩略图存在，使用缩略图路径
+                thumbnail_url = f"/{thumbnail_path.replace(chr(92), '/')}" if not thumbnail_path.startswith('/') else thumbnail_path.replace(chr(92), '/')
+            else:
+                # 缩略图不存在，使用原图
+                thumbnail_url = file_path
+        else:
+            thumbnail_url = file_path
+        
         result.append({
             "id": img.id,
             "filename": img.original_filename,
-            "file_path": f"/{img.file_path.replace(chr(92), '/')}" if not img.file_path.startswith('/') else img.file_path.replace(chr(92), '/'),
+            "file_path": file_path,  # 原图路径
+            "thumbnail_url": thumbnail_url,  # 缩略图路径（列表展示用）
             "is_annotated": img.is_annotated,
             "is_reviewed": img.is_reviewed,
             "annotation_count": annotation_count,
+            "required_annotation_count": img.required_annotation_count or 1,
             "annotation_status": annotation_status,
             "has_rejected": has_rejected,
             "folder_relative_path": img.folder_relative_path,
-            "created_at": img.created_at
+            "created_at": img.created_at,
+            "width": img.width,
+            "height": img.height
         })
     
-    return result
+    return {
+        "total": total_count,
+        "skip": skip,
+        "limit": limit,
+        "has_more": (skip + limit) < total_count,
+        "images": result
+    }
 
 @router.get("/task/{task_id}/next-unannotated")
 async def get_next_unannotated_image(
@@ -458,9 +545,15 @@ async def upload_folder(
             try:
                 # 计算相对路径（相对于上传的文件夹）
                 relative_path = os.path.relpath(file_path, folder_path)
+                # 获取相对路径中的目录部分（不包含文件名）
+                relative_dir = os.path.dirname(relative_path)
                 
-                # 生成唯一文件名
-                unique_filename = f"{uuid.uuid4()}{file_ext}"
+                # 生成唯一且可读的文件名（包含文件夹路径信息）
+                unique_filename, display_name = generate_unique_filename(
+                    original_filename=file,
+                    upload_dir=upload_dir,
+                    folder_path=relative_dir if relative_dir and relative_dir != '.' else None
+                )
                 target_path = os.path.join(upload_dir, unique_filename)
                 
                 # 复制文件
@@ -481,6 +574,7 @@ async def upload_folder(
                 # 保存到数据库
                 db_image = Image(
                     task_id=task_id,
+                    filename=unique_filename,  # 使用新的唯一文件名
                     original_filename=file,
                     file_path=target_path,
                     width=width,
