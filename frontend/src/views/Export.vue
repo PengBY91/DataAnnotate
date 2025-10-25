@@ -190,6 +190,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/utils/api'
+import '@/styles/views/Export.css'
 import { ElMessage } from 'element-plus'
 
 const authStore = useAuthStore()
@@ -443,44 +444,3 @@ onMounted(() => {
   }
 })
 </script>
-
-<style scoped>
-.export {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.export-history-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.text-muted {
-  color: #999;
-}
-
-.progress-dialog .progress-info {
-  margin-bottom: 20px;
-}
-
-.progress-dialog .progress-text {
-  margin-bottom: 10px;
-  font-size: 14px;
-  color: #666;
-}
-
-.completion-info {
-  margin-top: 20px;
-}
-</style>

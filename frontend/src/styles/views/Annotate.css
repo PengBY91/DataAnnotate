@@ -1,0 +1,160 @@
+/* 全屏容器 - 不使用 MainLayout */
+.annotate-container-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f5f7fa;
+  z-index: 999;
+}
+
+/* 压缩的顶部工具栏 - 一行搞定 */
+.compact-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e4e7ed;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+  height: 56px;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-center {
+  flex: 1;
+  max-width: 800px;
+  margin: 0 20px;
+}
+
+/* 全屏图像容器 */
+.image-container-fullscreen {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #2c2c2c;
+  overflow: hidden;
+  position: relative;
+}
+
+.image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 95%;
+  max-height: 95%;
+}
+
+.annotation-canvas {
+  border: 2px solid #409eff;
+  cursor: crosshair;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* 悬浮的标注列表面板 */
+.annotations-floating-panel {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 320px;
+  max-height: 400px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  z-index: 100;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.panel-content {
+  max-height: 350px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.floating-annotation-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.floating-annotation-item:hover {
+  background: #ecf5ff;
+  border-color: #b3d8ff;
+}
+
+.floating-annotation-item.selected {
+  background: #e3f2fd;
+  border-color: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+}
+
+.annotation-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #409eff;
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.annotation-label-text {
+  flex: 1;
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tab 样式覆盖 */
+.annotate-container-fullscreen :deep(.el-tabs--border-card) {
+  border: none;
+  box-shadow: none;
+}
+
+.annotate-container-fullscreen :deep(.el-tabs__header) {
+  background: transparent;
+  border: none;
+  margin: 0;
+}
+
+.annotate-container-fullscreen :deep(.el-tabs__content) {
+  padding: 0;
+}
+
+.annotate-container-fullscreen :deep(.el-tabs__item) {
+  padding: 6px 12px;
+  height: auto;
+  line-height: 1.4;
+  font-size: 13px;
+}
+

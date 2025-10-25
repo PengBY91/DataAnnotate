@@ -271,6 +271,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import '@/styles/views/QualityControl.css'
 
 const authStore = useAuthStore()
 
@@ -534,89 +535,3 @@ onMounted(() => {
   fetchStats()
 })
 </script>
-
-<style scoped>
-.quality-control {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.stats-row {
-  margin-bottom: 20px;
-}
-
-.stat-card {
-  text-align: center;
-}
-
-.stat-content {
-  padding: 20px;
-}
-
-.stat-value {
-  font-size: 32px;
-  font-weight: bold;
-  color: #409eff;
-  margin-bottom: 8px;
-}
-
-.stat-label {
-  font-size: 14px;
-  color: #666;
-}
-
-.filter-card {
-  margin-bottom: 20px;
-}
-
-.reviews-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.data-preview {
-  font-family: monospace;
-  font-size: 12px;
-  color: #666;
-}
-
-.text-muted {
-  color: #999;
-}
-
-.review-dialog .image-section,
-.review-dialog .annotation-section {
-  margin-bottom: 20px;
-}
-
-.review-dialog h4 {
-  margin-bottom: 10px;
-  color: #333;
-}
-
-.review-dialog pre {
-  background: #f5f5f5;
-  padding: 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-</style>

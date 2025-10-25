@@ -821,6 +821,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import '@/styles/views/TaskDetail.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -1539,86 +1540,3 @@ onMounted(() => {
   }
 })
 </script>
-
-<style scoped>
-.task-detail {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-.task-info {
-  margin-bottom: 20px;
-}
-
-.task-description,
-.task-instructions,
-.task-labels {
-  margin-top: 20px;
-}
-
-.task-labels {
-  margin-top: 20px;
-}
-
-.images-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.task-stats {
-  margin-bottom: 20px;
-}
-
-.stat-item {
-  margin-bottom: 20px;
-}
-
-.stat-label {
-  margin-bottom: 8px;
-  font-weight: bold;
-}
-
-.actions-panel {
-  margin-bottom: 20px;
-}
-
-.action-buttons {
-  display: flex;
-  flex-direction: column;
-}
-
-.folder-upload {
-  padding: 20px 0;
-}
-
-.upload-tip {
-  margin-top: 20px;
-}
-
-.upload-tip p {
-  margin: 5px 0;
-  font-size: 14px;
-}
-
-.filename {
-  font-weight: 500;
-  color: #303133;
-}
-
-.folder-path {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 2px;
-}
-</style>

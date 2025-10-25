@@ -230,6 +230,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import '@/styles/views/Tasks.css'
 
 const authStore = useAuthStore()
 
@@ -477,28 +478,3 @@ onMounted(() => {
   fetchTasks()
 })
 </script>
-
-<style scoped>
-.tasks {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.filter-card {
-  margin-bottom: 20px;
-}
-
-.tasks-card {
-  margin-bottom: 20px;
-}
-
-.labels-display {
-  margin-top: 8px;
-}
-</style>
